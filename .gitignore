@@ -169,3 +169,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Misc
+logs/
+models/
+crawler/crawler_state/
+crawler/vector_store/
+crawler-old.py
