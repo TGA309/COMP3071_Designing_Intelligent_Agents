@@ -1,20 +1,21 @@
 from pathlib import Path
 
-# Initial URLs for crawling
-seed_urls = [
-    "https://developer.mozilla.org/en-US/",
-    "https://docs.python.org/3/"
-]
-
-# Maximum number of pages to crawl
-max_pages = 100
-
 # Save frequency for saving crawler state
-save_frequency = 10
+save_frequency = 5
+
+# Top n results
+TOP_N_RESULTS = 5
+
+# Number of vector store results
+k_vector_store = 3
+
+# Relevance threshold for responses
+relevance_threshold = 0.5
 
 # Model and caching settings
 MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 MODEL_CACHE_DIR = Path("models")
+MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Logging directory
 LOG_DIR = Path("logs")

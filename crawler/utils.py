@@ -15,11 +15,3 @@ def clean_text(text: str) -> str:
     # Remove email addresses
     text = re.sub(r'[\w\.-]+@[\w\.-]+', '', text)
     return text.strip()
-
-def is_relevant_url(url: str) -> bool:
-    """Filter URLs based on relevance to technical content."""
-    technical_domains = [
-        'docs.', 'developer.', 'github.com',
-        'stackoverflow.com', 'medium.com'
-    ]
-    return any(domain in url.lower() for domain in technical_domains)

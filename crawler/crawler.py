@@ -1,24 +1,24 @@
 # crawler/crawler.py
 
 import requests
-import re
-from typing import List, Dict
+from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from huggingface_hub import snapshot_download
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # Import our modularized components and config
-from crawler.config import save_frequency, MODEL_NAME, MODEL_CACHE_DIR
+from crawler.config import save_frequency, MODEL_NAME, MODEL_CACHE_DIR, TOP_N_RESULTS
 from crawler.logger import setup_logger
-from crawler.utils import clean_text, is_relevant_url
+from crawler.utils import clean_text
+from crawler.search import perform_search
 from crawler import extractor, store
 
 
 class AdaptiveWebCrawler:
-    def __init__(self, seed_urls: List[str], max_pages: int = 100):
-        self.seed_urls = seed_urls
-        self.max_pages = max_pages
+    def __init__(self):
+        # Initially, no seed urls are set.
+        self.seed_urls: List[str] = []
         self.visited_urls = set()
         self.content_store = []
         self.pattern_memory = {}
@@ -26,8 +26,6 @@ class AdaptiveWebCrawler:
         self.logger = setup_logger()
         
         # Setup model caching
-        MODEL_CACHE_DIR.mkdir(exist_ok=True)
-        
         model_path = MODEL_CACHE_DIR / MODEL_NAME.split('/')[-1]
         if not model_path.exists():
             self.logger.info(f"Downloading model {MODEL_NAME} for first time use...")
@@ -40,80 +38,93 @@ class AdaptiveWebCrawler:
         
         self.vector_store = None
 
-    def crawl(self):
-        """Main crawling logic with adaptive behavior."""
+    def crawl(self, prompt: str, urls: Optional[List[str]] = None, strict: bool = False):
+        """
+        Starts the crawl process based on the following workflow:
+        
+        Case 1: If only a prompt is provided (no urls, strict is False):
+            - Perform search queries (across multiple search engines) using the prompt.
+            - Rank and select the top N results (N defined in TOP_N_RESULTS).
+        
+        Case 2: If a prompt and urls are provided and strict is False:
+            - Perform search as in Case 1.
+            - Combine the search results with the user-provided urls (deduplicated).
+        
+        Case 3: If a prompt, urls are provided and strict is True:
+            - Only use the provided urls.
+        
+        After determining the seed URLs, each URL is scraped for content.
+        State (visited urls) and the vector store are updated for online learning.
+        """
+        # Load saved state (visited URLs and vector store) if available.
         self.visited_urls, self.vector_store = store.load_state(self.logger, self.embeddings)
         
-        # Filter out already visited URLs from initial URLs
-        urls_to_visit = [url for url in self.seed_urls if url not in self.visited_urls]
-        if not urls_to_visit:
-            urls_to_visit = self.seed_urls.copy()
+        # Determine the seed URLs based on the provided input:
+        if strict:
+            # Case 3: Use only provided URLs (or if none, fall back to search results)
+            self.seed_urls = urls if urls is not None else perform_search(prompt, TOP_N_RESULTS)
+        else:
+            if urls is None:
+                # Case 1: Only prompt provided.
+                self.seed_urls = perform_search(prompt, TOP_N_RESULTS)
+            else:
+                # Case 2: Both prompt and urls provided; combine search results with user URLs.
+                search_results = perform_search(prompt, TOP_N_RESULTS)
+                # Use a set to deduplicate.
+                self.seed_urls = list(set(urls) | set(search_results))
         
-        self.logger.info(f"Starting crawl with {len(urls_to_visit)} unvisited URLs")
+        self.logger.info(f"Using {len(self.seed_urls)} seed URLs for crawling.")
         
         docs_since_last_save = 0
         
-        while urls_to_visit and len(self.visited_urls) < self.max_pages:
-            url = urls_to_visit.pop(0)
-
+        # Iterate over the seed URLs (no need to follow additional links)
+        for url in self.seed_urls:
             if url in self.visited_urls:
                 continue
-                
+
             try:
                 self.logger.info(f"Attempting to crawl: {url}")
                 response = requests.get(url, timeout=10)
                 self.logger.info(f"Retrieved content from {url} (status: {response.status_code})")
                 
+                # Use response.content to let BeautifulSoup detect proper encoding.
                 soup = BeautifulSoup(response.content, 'html.parser')
+                # Extract content using our extractor.
                 content = extractor.extract_content(soup, url, self.pattern_memory, clean_text)
                 
-                self.logger.info(f"Extracted {len(content['content'])} characters of content")
-                self.logger.info(f"Found {len(content['code_blocks'])} code blocks")
-                
-                if content['content'] and self.is_technical_content(content['content']):
-                    self.logger.info("Content identified as technical")
+                self.logger.info(f"Extracted {len(content['content'])} characters of content from {url}")
+                # Since URLs provided are assumed to be technical, no extra filtering is done.
+                if content['content']:
                     self.content_store.append(content)
-                    extractor.update_patterns(content, self.pattern_memory)
                     docs_since_last_save += 1
-                    
-                    # Get new links to visit
-                    new_links = extractor.get_links(soup, url, is_relevant_url)
-                    self.logger.info(f"Found {len(new_links)} new links")
-                    new_urls = [link for link in new_links if link not in self.visited_urls]
-                    urls_to_visit.extend(new_urls)
-                    self.logger.info(f"Added {len(new_urls)} new URLs to visit")
-                    self.logger.info(f"Remaining URLs to crawl: {len(urls_to_visit)}")
-                    
-                    # Save progress periodically
-                    if docs_since_last_save >= save_frequency:
-                        self.vector_store = store.update_vector_store(
-                            self.content_store,
-                            self.vector_store,
-                            self.embeddings
-                        )
-                        store.save_state(self.visited_urls, self.logger)
-                        docs_since_last_save = 0
-                        self.logger.info("Saved current progress")
                 else:
-                    self.logger.info("Content not identified as technical")
-                    if not content['content']:
-                        self.logger.info("No content was extracted")
-                    else:
-                        self.logger.info(f"First 200 characters of content: {content['content'][:200]}")
+                    self.logger.info("No content was extracted.")
                 
                 self.visited_urls.add(url)
                 
+                # Save progress periodically.
+                if docs_since_last_save >= save_frequency:
+                    self.vector_store = store.update_vector_store(
+                        self.content_store,
+                        self.vector_store,
+                        self.embeddings
+                    )
+                    store.save_state(self.visited_urls, self.logger)
+                    docs_since_last_save = 0
+                    self.logger.info("Saved current progress.")
             except Exception as e:
                 self.logger.error(f"Error crawling {url}: {str(e)}")
                 continue
             
-            # Status update after each URL
-            self.logger.info(f"\nCrawling Status:")
-            self.logger.info(f"URLs visited: {len(self.visited_urls)}")
-            self.logger.info(f"URLs remaining: {len(urls_to_visit)}")
-            self.logger.info(f"Technical content collected: {len(self.content_store)} pages\n")
-
-        # Final save
+            # Status update after each URL.
+            self.logger.info(f"Crawling Status:")
+            self.logger.info(f"URLs:")
+            self.logger.info(f"  - Visited this run: {len([u for u in self.visited_urls if u in self.seed_urls])}")
+            self.logger.info(f"  - Historical total: {len(self.visited_urls)}")
+            self.logger.info(f"  - Seed URLs remaining: {len([u for u in self.seed_urls if u not in self.visited_urls])}")
+            self.logger.info(f"Technical content collected: {len(self.content_store)} pages")
+        
+        # Final save if there are unsaved documents.
         if docs_since_last_save > 0:
             self.vector_store = store.update_vector_store(
                 self.content_store,
@@ -122,69 +133,13 @@ class AdaptiveWebCrawler:
             )
             store.save_state(self.visited_urls, self.logger)
         
-        self.logger.info(f"Crawling complete. Visited {len(self.visited_urls)} pages")
-        self.logger.info(f"Collected content from {len(self.content_store)} pages")
-
-    def is_technical_content(self, text: str) -> bool:
-        """
-        Determine if content is technical using multiple heuristics.
-        Returns True if content meets technical criteria.
-        """
-        if not text or len(text.strip()) < 100:
-            return False
-
-        text_lower = text.lower()
-        
-        programming_keywords = {
-            'function', 'class', 'method', 'variable', 'object', 'array',
-            'string', 'integer', 'boolean', 'null', 'undefined', 'return',
-            'import', 'export', 'const', 'let', 'var', 'async', 'await'
-        }
-        
-        technical_terms = {
-            'algorithm', 'api', 'implementation', 'interface', 'parameter',
-            'documentation', 'syntax', 'compiler', 'runtime', 'debug',
-            'exception', 'framework', 'library', 'module', 'package'
-        }
-        
-        languages_and_tools = {
-            'javascript', 'python', 'java', 'typescript', 'html', 'css',
-            'react', 'node', 'docker', 'git', 'sql', 'mongodb', 'api'
-        }
-
-        prog_count = sum(1 for word in programming_keywords if f" {word} " in f" {text_lower} ")
-        tech_count = sum(1 for word in technical_terms if f" {word} " in f" {text_lower} ")
-        tool_count = sum(1 for word in languages_and_tools if f" {word} " in f" {text_lower} ")
-        
-        code_indicators = [
-            len(re.findall(r'[\(\);{}]', text)),
-            len(re.findall(r'console\.|print\(|import\s+|from\s+.*\s+import', text_lower)),
-            len(re.findall(r'`[^`]+`|```[^`]+```', text)),
-            len(re.findall(r'<[^>]+>', text))
-        ]
-        
-        keyword_score = (prog_count + tech_count + tool_count) / (len(text.split()) + 1)
-        code_score = sum(code_indicators) / (len(text) + 1)
-        
-        self.logger.debug(f"Technical content scores - Keyword: {keyword_score:.4f}, Code: {code_score:.4f}")
-        
-        is_technical = (
-            (keyword_score > 0.01 or code_score > 0.005) and
-            any([
-                prog_count >= 2,
-                tech_count >= 2,
-                tool_count >= 1,
-                sum(code_indicators) >= 3
-            ])
-        )
-        
-        if is_technical:
-            self.logger.info(
-                f"Content identified as technical - Found {prog_count} programming keywords, "
-                f"{tech_count} technical terms, {tool_count} tool references"
-            )
-        
-        return is_technical
+        # Update final logging messages
+        urls_this_run = len([u for u in self.visited_urls if u in self.seed_urls])
+        self.logger.info(f"Crawling complete.")
+        self.logger.info(f"URLs processed:")
+        self.logger.info(f"  - Visited this run: {urls_this_run}")
+        self.logger.info(f"  - Historical total: {len(self.visited_urls)}")
+        self.logger.info(f"Collected content from {len(self.content_store)} pages.")
 
     def create_vector_store(self):
         """Create the FAISS vector store from crawled content."""

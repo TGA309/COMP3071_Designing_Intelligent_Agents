@@ -25,14 +25,14 @@ def load_state(logger, embeddings):
     vector_store = None
     
     if STATE_DIR.exists() and (STATE_DIR / "state.json").exists():
-        logger.info("\nLoading previous crawler state...")
+        logger.info("Loading previous crawler state...")
         with open(STATE_DIR / "state.json", "r") as f:
             state = json.load(f)
             visited_urls = set(state['visited_urls'])
             logger.info(f"Loaded state from: {state['timestamp']}")
     
     if VECTOR_STORE_DIR.exists() and (VECTOR_STORE_DIR / "index.faiss").exists():
-        logger.info("\nLoading existing vector store...")
+        logger.info("Loading existing vector store...")
         vector_store = FAISS.load_local(str(VECTOR_STORE_DIR), embeddings, allow_dangerous_deserialization=True)
     
     return visited_urls, vector_store
@@ -40,7 +40,7 @@ def load_state(logger, embeddings):
 def create_vector_store(content_store, embeddings, logger):
     """Create FAISS vector store from crawled content."""
 
-    if VECTOR_STORE_DIR.exists():
+    if VECTOR_STORE_DIR.exists() and (VECTOR_STORE_DIR / "index.faiss").exists():
         logger.info("Loading cached vector store...")
         vector_store = FAISS.load_local(str(VECTOR_STORE_DIR), embeddings, allow_dangerous_deserialization=True)
         return vector_store

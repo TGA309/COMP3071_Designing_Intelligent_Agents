@@ -73,12 +73,3 @@ def update_patterns(successful_content, pattern_memory):
     
     if len(successful_content['content']) > 100:
         pattern_memory[domain]['success_count'] = pattern_memory[domain].get('success_count', 0) + 1
-
-def get_links(soup, base_url, is_relevant_url):
-    """Extract and filter relevant links."""
-    links = []
-    for link in soup.find_all('a', href=True):
-        url = urljoin(base_url, link['href'])
-        if is_relevant_url(url):
-            links.append(url)
-    return links

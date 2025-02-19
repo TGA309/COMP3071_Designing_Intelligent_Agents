@@ -2,12 +2,21 @@
 
 import logging
 import datetime
-import os
 from crawler.config import LOG_DIR
 
-def setup_logger():
+class SingletonLogger:
+    _instance = None
+    _initialized = False
+
+    @classmethod
+    def get_logger(cls):
+        if cls._instance is None:
+            cls._instance = cls._setup_logger()
+        return cls._instance
+
+    @staticmethod
+    def _setup_logger():
         """Setup logging to both console and file with timestamp."""
-   
         # Create timestamp for log file
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         log_file = LOG_DIR / f'logs_{timestamp}.txt'
@@ -19,9 +28,7 @@ def setup_logger():
                 msg = super().format(record)
                 
                 # Add separators based on message content
-                if "Starting crawl with" in record.msg:
-                    msg = "\n" + "="*80 + "\n" + msg + "\n" + "="*80
-                elif "Attempting to crawl:" in record.msg:
+                if "Attempting to crawl:" in record.msg:
                     msg = "\n" + "-"*40 + "\nCrawling New URL\n" + "-"*40 + "\n" + msg
                 elif "Crawling Status:" in record.msg:
                     msg = "\n" + "-"*40 + "\nStatus Update\n" + msg
@@ -37,21 +44,28 @@ def setup_logger():
         # Setup formatter
         formatter = GroupFormatter('%(asctime)s - %(levelname)s - %(message)s')
         
-        # Setup handlers
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        
         # Setup logger
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
+        logger = logging.getLogger('crawler')  # Use a specific name for our logger
         
-        # Prevent double logging
-        logger.propagate = False
+        # Only add handlers if they haven't been added before
+        if not logger.handlers:
+            # Setup handlers
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            
+            logger.setLevel(logging.INFO)
+            logger.addHandler(file_handler)
+            logger.addHandler(console_handler)
+            
+            # Prevent double logging
+            logger.propagate = False
+            
+            logger.info(f'Logging to file: {log_file}')
         
-        logger.info(f'Logging to file: {log_file}')
-
         return logger
+
+def setup_logger():
+    """Get or create the singleton logger instance."""
+    return SingletonLogger.get_logger()
