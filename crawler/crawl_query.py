@@ -40,8 +40,8 @@ def perform_crawl_and_query(
             cache_folder=str(MODEL_CACHE_DIR)
         )
 
-        # Try to load existing vector store if not forcing a crawl
-        if not force_crawl:
+        # Try to load existing vector store if not forcing a crawl or if strict url scraping mode is not enabled
+        if not force_crawl and not strict:
 
             # Initialize logger
             logger = setup_logger()
@@ -50,16 +50,11 @@ def perform_crawl_and_query(
             
             if vector_store is not None:
                 logger.info("Querying existing vector store...")
-                # Query existing vector store
-                results = vector_store.similarity_search_with_relevance_scores(prompt, k=k)
+                # Query existing vector store with strict flag
+                results = crawler.query(prompt, k=k, strict=strict)  # Pass strict flag
                 
                 # Format results
-                formatted_results = [{
-                    'content': doc.page_content,
-                    'source': doc.metadata['source'],
-                    'domain': doc.metadata['domain'],
-                    'score': score
-                } for doc, score in results]
+                formatted_results = results  # Results are already formatted by query method
                 
                 # Check if results are good enough
                 if formatted_results and all(r['score'] >= relevance_threshold for r in formatted_results):
@@ -82,6 +77,7 @@ def perform_crawl_and_query(
         
         # If we get here, either:
         # 1. force_crawl was True
+        # 2. strict was True
         # 2. vector store didn't exist
         # 3. or results weren't good enough
         # So we proceed with normal crawl
@@ -99,7 +95,7 @@ def perform_crawl_and_query(
         crawler.create_vector_store()
         
         # Query the vector store
-        results = crawler.query(prompt, k=k)
+        results = crawler.query(prompt, k=k, strict=strict)
         
         # Prepare metadata about the crawl
         metadata = {

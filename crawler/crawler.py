@@ -145,12 +145,44 @@ class AdaptiveWebCrawler:
         """Create the FAISS vector store from crawled content."""
         self.vector_store = store.create_vector_store(self.content_store, self.embeddings, self.logger)
 
-    def query(self, question: str, k: int = 3) -> List[Dict]:
-        """Query the vector store for relevant content."""
+    def query(self, question: str, k: int = 3, strict: bool = False) -> List[Dict]:
+        """
+        Query the vector store for relevant content.
+        In strict mode, only returns results from seed URLs.
+        
+        Args:
+            question (str): The query string
+            k (int): Number of results to return
+            strict (bool): Whether to restrict results to seed URLs only
+            
+        Returns:
+            List[Dict]: List of relevant documents with metadata
+        """
         if not self.vector_store:
             raise ValueError("Vector store not created. Run create_vector_store() first.")
+        
+        # Get more results than needed since we might filter some out in strict mode
+        buffer_k = k * 3 if strict else k
+        results = self.vector_store.similarity_search_with_relevance_scores(question, k=buffer_k)
+        
+        if strict and self.seed_urls:
+            # Filter results to only include those from seed URLs
+            filtered_results = []
             
-        results = self.vector_store.similarity_search_with_relevance_scores(question, k=k)
+            for doc, score in results:
+                # Check if the document's source URL is in seed_urls
+                if doc.metadata['source'] in self.seed_urls:
+                    filtered_results.append((doc, score))
+                
+                # Break if we have enough results
+                if len(filtered_results) >= k:
+                    break
+            
+            # Use filtered results
+            results = filtered_results[:k]
+        else:
+            # In non-strict mode, just take top k
+            results = results[:k]
         
         return [{
             'content': doc.page_content,
