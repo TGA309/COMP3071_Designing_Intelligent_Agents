@@ -66,7 +66,8 @@ flowchart TD
         NLP2 --> NLP3[Format Output]
     end
 
-    NLP3 --> Display[Frontend Display]
+    NLP3 --> NLP4[API Response]
+    NLP4 --> Display[Frontend Display]
 
     style Frontend fill:#00EE90,stroke:#333,stroke-width:2px
     style NLPProcess fill:#f9f,stroke:#333,stroke-width:2px
