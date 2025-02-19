@@ -2,9 +2,7 @@
 
 import requests
 import re
-from pathlib import Path
 from typing import List, Dict
-import datetime
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from huggingface_hub import snapshot_download
@@ -66,8 +64,8 @@ class AdaptiveWebCrawler:
                 response = requests.get(url, timeout=10)
                 self.logger.info(f"Retrieved content from {url} (status: {response.status_code})")
                 
-                soup = BeautifulSoup(response.text, 'html.parser')
-                content = extractor.extract_content(soup, url, self.pattern_memory, clean_text, self.logger)
+                soup = BeautifulSoup(response.content, 'html.parser')
+                content = extractor.extract_content(soup, url, self.pattern_memory, clean_text)
                 
                 self.logger.info(f"Extracted {len(content['content'])} characters of content")
                 self.logger.info(f"Found {len(content['code_blocks'])} code blocks")
@@ -91,8 +89,7 @@ class AdaptiveWebCrawler:
                         self.vector_store = store.update_vector_store(
                             self.content_store,
                             self.vector_store,
-                            self.embeddings,
-                            self.logger
+                            self.embeddings
                         )
                         store.save_state(self.visited_urls, self.logger)
                         docs_since_last_save = 0
@@ -121,8 +118,7 @@ class AdaptiveWebCrawler:
             self.vector_store = store.update_vector_store(
                 self.content_store,
                 self.vector_store,
-                self.embeddings,
-                self.logger
+                self.embeddings
             )
             store.save_state(self.visited_urls, self.logger)
         

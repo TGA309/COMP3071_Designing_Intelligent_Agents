@@ -5,7 +5,7 @@ import datetime
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
-from .config import STATE_DIR, VECTOR_STORE_DIR
+from .config import STATE_DIR, VECTOR_STORE_DIR, CHUNK_SIZE, CHUNK_OVERLAP
 
 def save_state(visited_urls, logger):
     """Save crawler state to disk."""
@@ -40,17 +40,13 @@ def load_state(logger, embeddings):
 def create_vector_store(content_store, embeddings, logger):
     """Create FAISS vector store from crawled content."""
 
-    if not content_store:
-        logger.error("No content has been crawled yet!")
-        return
-
     if VECTOR_STORE_DIR.exists():
         logger.info("Loading cached vector store...")
         vector_store = FAISS.load_local(str(VECTOR_STORE_DIR), embeddings, allow_dangerous_deserialization=True)
         return vector_store
 
     logger.info(f"Creating vector store from {len(content_store)} documents")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     
     documents = []
     for content in content_store:
@@ -81,9 +77,9 @@ def create_vector_store(content_store, embeddings, logger):
     
     return vector_store
 
-def update_vector_store(content_store, vector_store, embeddings, logger):
+def update_vector_store(content_store, vector_store, embeddings):
     """Incrementally update the vector store with new content."""
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     
     # Only process content not already in vector store
     processed_urls = set()

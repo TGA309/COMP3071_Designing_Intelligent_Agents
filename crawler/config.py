@@ -27,3 +27,7 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 # Vector Store directory
 VECTOR_STORE_DIR = Path("crawler/vector_store")
 VECTOR_STORE_DIR.mkdir(parents=True, exist_ok=True)
+
+# RecursiveCharacterTextSplitter parameters
+CHUNK_SIZE = 3000
+CHUNK_OVERLAP = 50

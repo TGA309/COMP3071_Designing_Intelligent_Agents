@@ -3,7 +3,7 @@
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
-def extract_content(soup, url, pattern_memory, clean_text, logger):
+def extract_content(soup, url, pattern_memory, clean_text):
     """
     Extract relevant content using learned patterns.
     Removes unwanted elements and applies domain-specific extraction rules.
