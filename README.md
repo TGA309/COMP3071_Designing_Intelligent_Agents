@@ -61,13 +61,12 @@ flowchart TD
     R --> NLP
 
     subgraph NLPProcess["NLP Enhancement"]
-        NLP --> NLP1[Load Model]
-        NLP1 --> NLP2[Format Input]
-        NLP2 --> NLP3[Generate Response]
-        NLP3 --> NLP4[Format Output]
+        NLP --> NLP1[Load Pre-Trained LLM Model for NLP Processing]
+        NLP1 --> NLP2[Generate Response]
+        NLP2 --> NLP3[Format Output]
     end
 
-    NLP4 --> Display[Frontend Display]
+    NLP3 --> Display[Frontend Display]
 
     style Frontend fill:#00EE90,stroke:#333,stroke-width:2px
     style NLPProcess fill:#f9f,stroke:#333,stroke-width:2px
