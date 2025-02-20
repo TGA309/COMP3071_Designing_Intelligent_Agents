@@ -1,7 +1,6 @@
 # crawler/extractor.py
 
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 def extract_content(soup, url, pattern_memory, clean_text):
     """

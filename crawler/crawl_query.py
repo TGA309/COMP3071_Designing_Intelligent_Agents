@@ -1,8 +1,5 @@
 from typing import List, Dict, Optional
 from crawler.crawler import AdaptiveWebCrawler
-from crawler import store
-from langchain_huggingface import HuggingFaceEmbeddings
-from crawler.config import MODEL_NAME, MODEL_CACHE_DIR
 from crawler.logger import setup_logger
 
 def perform_crawl_and_query(
@@ -32,13 +29,11 @@ def perform_crawl_and_query(
         - metadata: Crawling statistics
         - from_cache: Whether results came from cached vector store
     """
+
+    # Initialise crawler
+    crawler = AdaptiveWebCrawler()
+
     try:
-        
-        # Initialize embeddings for vector store
-        embeddings = HuggingFaceEmbeddings(
-            model_name=str(MODEL_CACHE_DIR / MODEL_NAME.split('/')[-1]),
-            cache_folder=str(MODEL_CACHE_DIR)
-        )
 
         # Try to load existing vector store if not forcing a crawl or if strict url scraping mode is not enabled
         if not force_crawl and not strict:
@@ -46,34 +41,33 @@ def perform_crawl_and_query(
             # Initialize logger
             logger = setup_logger()
 
-            _, vector_store = store.load_state(logger, embeddings)
+            # Create or load vector store
+            crawler.create_vector_store()
             
-            if vector_store is not None:
-                logger.info("Querying existing vector store...")
-                # Query existing vector store with strict flag
-                results = crawler.query(prompt, k=k, strict=strict)  # Pass strict flag
-                
-                # Format results
-                formatted_results = results  # Results are already formatted by query method
-                
-                # Check if results are good enough
-                if formatted_results and all(r['score'] >= relevance_threshold for r in formatted_results):
-                    logger.info("Found relevant results in cached vector store")
-                    return {
-                        "status": "success",
-                        "results": formatted_results,
-                        "metadata": {
-                            "urls": {
-                                "visited_this_run": 0,
-                                "historical_total": 0,
-                                "seed_urls": 0,
-                                "remaining": 0
-                            },
-                            "content_collected": 0,
-                            "from_cache": True
-                        }
+            # Query existing vector store with strict flag
+            results = crawler.query(prompt, k=k, strict=strict)  # Pass strict flag
+            
+            # Format results
+            formatted_results = results  # Results are already formatted by query method
+            
+            # Check if results are good enough
+            if formatted_results and all(r['score'] >= relevance_threshold for r in formatted_results):
+                logger.info("Found relevant results in cached vector store")
+                return {
+                    "status": "success",
+                    "results": formatted_results,
+                    "metadata": {
+                        "urls": {
+                            "visited_this_run": 0,
+                            "historical_total": 0,
+                            "seed_urls": 0,
+                            "remaining": 0
+                        },
+                        "content_collected": 0,
+                        "from_cache": True
                     }
-                logger.info("Cached results not relevant enough, proceeding with new crawl")
+                }
+            logger.info("Cached results not relevant enough, proceeding with new crawl")
         
         # If we get here, either:
         # 1. force_crawl was True
@@ -81,9 +75,7 @@ def perform_crawl_and_query(
         # 2. vector store didn't exist
         # 3. or results weren't good enough
         # So we proceed with normal crawl
-        
-        crawler = AdaptiveWebCrawler()
-        
+
         # Perform crawl
         crawler.crawl(
             prompt=prompt,
