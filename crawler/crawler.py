@@ -159,7 +159,11 @@ class AdaptiveWebCrawler:
             List[Dict]: List of relevant documents with metadata
         """
         if not self.vector_store:
-            raise ValueError("Vector store not created. Run create_vector_store() first.")
+            if not self.content_store:
+                # Return empty results if no content available
+                return []
+            else:
+                raise ValueError("Vector store not created. Run create_vector_store() first.")
         
         # Get more results than needed since we might filter some out in strict mode
         buffer_k = k * 3 if strict else k

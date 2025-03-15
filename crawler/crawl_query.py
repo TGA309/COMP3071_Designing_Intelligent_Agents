@@ -67,7 +67,12 @@ def perform_crawl_and_query(
                         "from_cache": True
                     }
                 }
-            logger.info("Cached results not relevant enough, proceeding with new crawl")
+            
+            if not formatted_results:
+                logger.info("No content in vector store, proceeding with new crawl")
+
+            else:
+                logger.info("Cached results not relevant enough, proceeding with new crawl")
         
         # If we get here, either:
         # 1. force_crawl was True
