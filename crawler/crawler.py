@@ -3,12 +3,11 @@
 import requests
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
-from sklearn.feature_extraction.text import TfidfVectorizer
 from huggingface_hub import snapshot_download
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # Import our modularized components and config
-from crawler.config import config
+from config import config
 from crawler.logger import setup_logger
 from crawler.utils import clean_text
 from crawler.search import perform_search
@@ -22,18 +21,17 @@ class AdaptiveWebCrawler:
         self.visited_urls = set()
         self.content_store = []
         self.pattern_memory = {}
-        self.vectorizer = TfidfVectorizer(stop_words='english')
         self.logger = setup_logger()
         
         # Setup model caching
-        model_path = config.MODEL_CACHE_DIR / config.MODEL_NAME.split('/')[-1]
+        model_path = config.model.MODEL_CACHE_DIR / config.model.MODEL_NAME.split('/')[-1]
         if not model_path.exists():
-            self.logger.info(f"Downloading model {config.MODEL_NAME} for first time use...")
-            snapshot_download(repo_id=config.MODEL_NAME, local_dir=str(model_path))
+            self.logger.info(f"Downloading model {config.model.MODEL_NAME} for first time use...")
+            snapshot_download(repo_id=config.model.MODEL_NAME, local_dir=str(model_path))
         
         self.embeddings = HuggingFaceEmbeddings(
             model_name=str(model_path),
-            cache_folder=str(config.MODEL_CACHE_DIR)
+            cache_folder=str(config.model.MODEL_CACHE_DIR)
         )
         
         self.vector_store = None
@@ -62,14 +60,14 @@ class AdaptiveWebCrawler:
         # Determine the seed URLs based on the provided input:
         if strict:
             # Case 3: Use only provided URLs (or if none, fall back to search results)
-            self.seed_urls = urls if urls is not None else perform_search(prompt, config.TOP_N_RESULTS)
+            self.seed_urls = urls if urls is not None else perform_search(prompt, config.crawler.TOP_N_RESULTS)
         else:
             if urls is None:
                 # Case 1: Only prompt provided.
-                self.seed_urls = perform_search(prompt, config.TOP_N_RESULTS)
+                self.seed_urls = perform_search(prompt, config.crawler.TOP_N_RESULTS)
             else:
                 # Case 2: Both prompt and urls provided; combine search results with user URLs.
-                search_results = perform_search(prompt, config.TOP_N_RESULTS)
+                search_results = perform_search(prompt, config.crawler.TOP_N_RESULTS)
                 # Use a set to deduplicate.
                 self.seed_urls = list(set(urls) | set(search_results))
         
@@ -77,7 +75,7 @@ class AdaptiveWebCrawler:
         
         docs_since_last_save = 0
         
-        # Iterate over the seed URLs (no need to follow additional links)
+        # Iterate over the seed URLs
         for url in self.seed_urls:
             if url in self.visited_urls:
                 continue
@@ -103,7 +101,7 @@ class AdaptiveWebCrawler:
                 self.visited_urls.add(url)
                 
                 # Save progress periodically.
-                if docs_since_last_save >= config.save_frequency:
+                if docs_since_last_save >= config.crawler.save_frequency:
                     self.vector_store = store.update_vector_store(
                         self.content_store,
                         self.vector_store,
@@ -112,17 +110,24 @@ class AdaptiveWebCrawler:
                     store.save_state(self.visited_urls, self.logger)
                     docs_since_last_save = 0
                     self.logger.info("Saved current progress.")
-            except Exception as e:
+
+            except requests.exceptions.Timeout:
+                self.logger.error(f"Timeout error on {url}. Skipping to next URL.")
+                continue
+            except requests.exceptions.RequestException as e:
                 self.logger.error(f"Error crawling {url}: {str(e)}")
                 continue
+
+            except Exception as e:
+                self.logger.error(f"Error crawling {url}: {str(e)}")
             
             # Status update after each URL.
             self.logger.info(f"Crawling Status:")
             self.logger.info(f"URLs:")
-            self.logger.info(f"  - Visited this run: {len([u for u in self.visited_urls if u in self.seed_urls])}")
-            self.logger.info(f"  - Historical total: {len(self.visited_urls)}")
-            self.logger.info(f"  - Seed URLs remaining: {len([u for u in self.seed_urls if u not in self.visited_urls])}")
-            self.logger.info(f"Technical content collected: {len(self.content_store)} pages")
+            self.logger.info(f"  Visited this run: {len([u for u in self.visited_urls if u in self.seed_urls])}")
+            self.logger.info(f"  Historical total: {len(self.visited_urls)}")
+            self.logger.info(f"  Seed URLs remaining: {len([u for u in self.seed_urls if u not in self.visited_urls])}")
+            self.logger.info(f"Content collected: {len(self.content_store)} pages")
         
         # Final save if there are unsaved documents.
         if docs_since_last_save > 0:
@@ -137,8 +142,8 @@ class AdaptiveWebCrawler:
         urls_this_run = len([u for u in self.visited_urls if u in self.seed_urls])
         self.logger.info(f"Crawling complete.")
         self.logger.info(f"URLs processed:")
-        self.logger.info(f"  - Visited this run: {urls_this_run}")
-        self.logger.info(f"  - Historical total: {len(self.visited_urls)}")
+        self.logger.info(f"  Visited this run: {urls_this_run}")
+        self.logger.info(f"  Historical total: {len(self.visited_urls)}")
         self.logger.info(f"Collected content from {len(self.content_store)} pages.")
 
     def create_vector_store(self):

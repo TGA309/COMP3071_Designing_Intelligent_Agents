@@ -2,7 +2,7 @@
 
 import logging
 import datetime
-from crawler.config import config
+from config import config
 
 class SingletonLogger:
     _instance = None
@@ -19,7 +19,7 @@ class SingletonLogger:
         """Setup logging to both console and file with timestamp."""
         # Create timestamp for log file
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = config.LOG_DIR / f'logs_{timestamp}.txt'
+        log_file = config.logger.LOG_DIR / f'logs_{timestamp}.txt'
         
         # Custom formatter to handle grouping
         class GroupFormatter(logging.Formatter):

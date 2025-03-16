@@ -173,6 +173,5 @@ cython_debug/
 # Misc
 logs/
 models/
-crawler/crawler_state/
-crawler/vector_store/
-crawler-old.py
+crawler/states/
+old/

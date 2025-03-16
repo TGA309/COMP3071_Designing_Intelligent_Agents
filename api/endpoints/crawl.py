@@ -6,7 +6,7 @@ from typing import List, Optional
 from crawler.crawl_query import perform_crawl_and_query
 
 # Import config
-from crawler.config import k_vector_store, relevance_threshold
+from config import config
 
 router = APIRouter()
 
@@ -31,20 +31,14 @@ async def crawl_endpoint(request: CrawlRequest):
     strict_flag = request.strict
     force_crawl = request.force_crawl
 
-    # Use k_vector_store if provided, otherwise use the default k
-    k = k_vector_store if k_vector_store is not None else 3
-
-    # Use relevance_threshold if provided, otherwise use the default relevance_threshold
-    rel_threshold = relevance_threshold
-
     # Perform crawl and query
     crawl_response = perform_crawl_and_query(
         prompt=user_prompt,
         urls=urls,
         strict=strict_flag,
-        k=k,
+        k=config.api.crawl.k_vector_store,
         force_crawl=force_crawl,
-        relevance_threshold=rel_threshold
+        relevance_threshold=config.api.crawl.relevance_threshold
     )
 
     return crawl_response
