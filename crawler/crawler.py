@@ -8,7 +8,7 @@ from huggingface_hub import snapshot_download
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # Import our modularized components and config
-from crawler.config import save_frequency, MODEL_NAME, MODEL_CACHE_DIR, TOP_N_RESULTS
+from crawler.config import config
 from crawler.logger import setup_logger
 from crawler.utils import clean_text
 from crawler.search import perform_search
@@ -26,14 +26,14 @@ class AdaptiveWebCrawler:
         self.logger = setup_logger()
         
         # Setup model caching
-        model_path = MODEL_CACHE_DIR / MODEL_NAME.split('/')[-1]
+        model_path = config.MODEL_CACHE_DIR / config.MODEL_NAME.split('/')[-1]
         if not model_path.exists():
-            self.logger.info(f"Downloading model {MODEL_NAME} for first time use...")
-            snapshot_download(repo_id=MODEL_NAME, local_dir=str(model_path))
+            self.logger.info(f"Downloading model {config.MODEL_NAME} for first time use...")
+            snapshot_download(repo_id=config.MODEL_NAME, local_dir=str(model_path))
         
         self.embeddings = HuggingFaceEmbeddings(
             model_name=str(model_path),
-            cache_folder=str(MODEL_CACHE_DIR)
+            cache_folder=str(config.MODEL_CACHE_DIR)
         )
         
         self.vector_store = None
@@ -62,14 +62,14 @@ class AdaptiveWebCrawler:
         # Determine the seed URLs based on the provided input:
         if strict:
             # Case 3: Use only provided URLs (or if none, fall back to search results)
-            self.seed_urls = urls if urls is not None else perform_search(prompt, TOP_N_RESULTS)
+            self.seed_urls = urls if urls is not None else perform_search(prompt, config.TOP_N_RESULTS)
         else:
             if urls is None:
                 # Case 1: Only prompt provided.
-                self.seed_urls = perform_search(prompt, TOP_N_RESULTS)
+                self.seed_urls = perform_search(prompt, config.TOP_N_RESULTS)
             else:
                 # Case 2: Both prompt and urls provided; combine search results with user URLs.
-                search_results = perform_search(prompt, TOP_N_RESULTS)
+                search_results = perform_search(prompt, config.TOP_N_RESULTS)
                 # Use a set to deduplicate.
                 self.seed_urls = list(set(urls) | set(search_results))
         
@@ -103,7 +103,7 @@ class AdaptiveWebCrawler:
                 self.visited_urls.add(url)
                 
                 # Save progress periodically.
-                if docs_since_last_save >= save_frequency:
+                if docs_since_last_save >= config.save_frequency:
                     self.vector_store = store.update_vector_store(
                         self.content_store,
                         self.vector_store,
@@ -192,5 +192,5 @@ class AdaptiveWebCrawler:
             'content': doc.page_content,
             'source': doc.metadata['source'],
             'domain': doc.metadata['domain'],
-            'score': score
+            'score': float(score)
         } for doc, score in results]
