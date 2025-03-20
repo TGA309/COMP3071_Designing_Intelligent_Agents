@@ -1,3 +1,4 @@
+# crawler/crawl_query.py
 from typing import List, Dict, Optional
 from crawler.crawler import AdaptiveWebCrawler
 from crawler.logger import setup_logger
@@ -29,15 +30,12 @@ def perform_crawl_and_query(
         - metadata: Crawling statistics
         - from_cache: Whether results came from cached vector store
     """
-
-    # Initialise crawler
+    # Initialize crawler
     crawler = AdaptiveWebCrawler()
-
+    
     try:
-
         # Try to load existing vector store if not forcing a crawl or if strict url scraping mode is not enabled
         if not force_crawl and not strict:
-
             # Initialize logger
             logger = setup_logger()
 
@@ -59,7 +57,7 @@ def perform_crawl_and_query(
                     "metadata": {
                         "urls": {
                             "visited_this_run": 0,
-                            "historical_total": 0,
+                            "historical_total": len(crawler.visited_urls),
                             "seed_urls": 0,
                             "remaining": 0
                         },
@@ -70,7 +68,6 @@ def perform_crawl_and_query(
             
             if not formatted_results:
                 logger.info("No content in vector store, proceeding with new crawl")
-
             else:
                 logger.info("Cached results not relevant enough, proceeding with new crawl")
         
@@ -80,7 +77,7 @@ def perform_crawl_and_query(
         # 2. vector store didn't exist
         # 3. or results weren't good enough
         # So we proceed with normal crawl
-
+        
         # Perform crawl
         crawler.crawl(
             prompt=prompt,
@@ -115,6 +112,7 @@ def perform_crawl_and_query(
     except Exception as e:
         if 'logger' in locals():
             logger.error(f"Error in perform_crawl_and_query: {str(e)}")
+        
         return {
             "status": "error",
             "error": str(e),
