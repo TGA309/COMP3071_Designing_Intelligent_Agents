@@ -2,7 +2,7 @@
 
 import re
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 import hashlib
 
@@ -113,16 +113,21 @@ class ContentHeuristics:
         # Add hash to the set
         self.content_hashes.add(content_hash)
         return True
-    
+
     def _extract_publish_date(self, soup):
         """Extract publication date from page metadata."""
         # Try common meta tags for publication date
         for meta in soup.find_all('meta'):
             if meta.get('property') in ['article:published_time', 'og:published_time'] or \
-               meta.get('name') in ['pubdate', 'publishdate', 'date']:
+            meta.get('name') in ['pubdate', 'publishdate', 'date']:
                 try:
                     date_str = meta.get('content')
-                    return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    # Make sure we have a timezone-aware datetime
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    # Ensure it's timezone-aware by adding UTC if needed
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
                 except (ValueError, TypeError):
                     pass
         
@@ -132,11 +137,16 @@ class ContentHeuristics:
                 import json
                 data = json.loads(script.string)
                 if isinstance(data, dict) and 'datePublished' in data:
-                    return datetime.fromisoformat(data['datePublished'].replace('Z', '+00:00'))
+                    dt = datetime.fromisoformat(data['datePublished'].replace('Z', '+00:00'))
+                    # Ensure it's timezone-aware
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
             except:
                 pass
         
         return None
+
     
     def _extract_main_content(self, soup):
         """Extract the main content area of the page."""

@@ -60,6 +60,7 @@ def tfidf_similarity_search(content_store, query, k=5):
 def combine_search_results(faiss_results, tfidf_results, faiss_weight=0.7):
     """
     Combine results from FAISS and TF-IDF with weighted scoring.
+    Default weightage: 70% FAISS score and 30% Cosine score.
     
     Args:
         faiss_results: List of (Document, score) tuples from FAISS

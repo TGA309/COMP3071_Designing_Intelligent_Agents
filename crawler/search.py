@@ -78,15 +78,15 @@ def duckduckgo_search(query, num_results=10):
         print(f"Error in DuckDuckGo search: {str(e)}")
         return []
 
-def perform_search(prompt, top_n=5):
+def perform_search(prompt, num_seed_urls=5):
     """
     Combine and rank search results from multiple search engines.
-    Returns the top_n results based on their presence across different engines.
+    Returns the top num_seed_urls results based on their presence across different engines.
     """
     # Get results from each search engine
-    google_results = google_search(prompt, top_n * 2)
-    bing_results = BingSearch().search(prompt, top_n * 2)
-    ddg_results = duckduckgo_search(prompt, top_n * 2)
+    google_results = google_search(prompt, num_seed_urls * 2)
+    bing_results = BingSearch().search(prompt, num_seed_urls * 2)
+    ddg_results = duckduckgo_search(prompt, num_seed_urls * 2)
     
     # Count occurrences of each URL across search engines
     url_scores = defaultdict(int)
@@ -103,5 +103,5 @@ def perform_search(prompt, top_n=5):
     # Sort URLs by their scores
     ranked_results = sorted(url_scores.items(), key=lambda x: x[1], reverse=True)
     
-    # Return top_n results
-    return [url for url, score in ranked_results[:top_n]]
+    # Return top num_seed_urls results
+    return [url for url, score in ranked_results[:num_seed_urls]]

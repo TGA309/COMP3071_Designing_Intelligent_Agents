@@ -55,7 +55,7 @@ def update_vector_store(content_store, vector_store, embeddings):
     
     if not new_documents:
         return vector_store
-        
+    
     documents = []
     for content in new_documents:
         if content['content'].strip():
@@ -66,7 +66,7 @@ def update_vector_store(content_store, vector_store, embeddings):
                     'source': content['url'],
                     'domain': content['domain']
                 })
-
+    
     if documents:
         texts = [doc['content'] for doc in documents]
         metadatas = [{'source': doc['source'], 'domain': doc['domain']} for doc in documents]
@@ -76,6 +76,6 @@ def update_vector_store(content_store, vector_store, embeddings):
         else:
             vector_store.add_texts(texts, metadatas)
         
-        vector_store.save_local(config.store.VECTOR_STORE_DIR)
+        vector_store.save_local(str(config.store.VECTOR_STORE_DIR))
     
     return vector_store

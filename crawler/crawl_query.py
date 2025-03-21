@@ -1,15 +1,19 @@
 # crawler/crawl_query.py
 from typing import List, Dict, Optional
 from crawler.crawler import AdaptiveWebCrawler
+from crawler.llm_response import generate_llm_response
 from crawler.logger import setup_logger
 
 def perform_crawl_and_query(
     prompt: str,
     urls: Optional[List[str]] = None,
     strict: bool = False,
-    k: int = 3,
+    n: int = 3,
+    num_seed_urls: int = 5,
+    max_depth: int = 5,
     force_crawl: bool = False,
-    relevance_threshold: float = 0.7  # Adjust threshold as needed
+    relevance_threshold: float = 0.5,
+    use_llm: bool = False  # New parameter
 ) -> Dict:
     """
     Performs a complete crawl operation and returns query results.
@@ -19,14 +23,18 @@ def perform_crawl_and_query(
         prompt (str): The user's query/prompt
         urls (Optional[List[str]]): Optional list of URLs to crawl
         strict (bool): Whether to only use provided URLs
-        k (int): Number of results to return from query
+        n (int): Number of results to return from query
+        num_seed_urls (int): Number of seed urls to get back from the search results
+        max_depth (int): Maximum crawl depth
         force_crawl (bool): Whether to force a new crawl instead of using existing vector store
         relevance_threshold (float): Minimum relevance score for results to be considered good enough
+        use_llm (bool): Whether to generate an LLM response based on the results
         
     Returns:
         Dict containing:
         - status: Success/failure indication
         - results: List of relevant documents
+        - llm_response: (Optional) Generated response from the LLM
         - metadata: Crawling statistics
         - from_cache: Whether results came from cached vector store
     """
@@ -34,26 +42,29 @@ def perform_crawl_and_query(
     crawler = AdaptiveWebCrawler()
     
     try:
+        # Create or load vector store
+        crawler.create_vector_store()
+        
         # Try to load existing vector store if not forcing a crawl or if strict url scraping mode is not enabled
         if not force_crawl and not strict:
             # Initialize logger
             logger = setup_logger()
-
-            # Create or load vector store
-            crawler.create_vector_store()
             
             # Query existing vector store with strict flag
-            results = crawler.query(prompt, k=k, strict=strict)  # Pass strict flag
-            
-            # Format results
-            formatted_results = results  # Results are already formatted by query method
+            results = crawler.query(prompt, n=n, strict=strict)
             
             # Check if results are good enough
-            if formatted_results and all(r['score'] >= relevance_threshold for r in formatted_results):
+            if results and all(r['score'] >= relevance_threshold for r in results):
                 logger.info("Found relevant results in cached vector store")
-                return {
+                
+                # Generate LLM response if requested
+                llm_response = None
+                if use_llm and results:
+                    llm_response = generate_llm_response(results, prompt)
+                
+                response = {
                     "status": "success",
-                    "results": formatted_results,
+                    "results": results,
                     "metadata": {
                         "urls": {
                             "visited_this_run": 0,
@@ -65,31 +76,35 @@ def perform_crawl_and_query(
                         "from_cache": True
                     }
                 }
+                
+                if llm_response:
+                    response["llm_response"] = llm_response
+                    
+                return response
             
-            if not formatted_results:
+            if not results:
                 logger.info("No content in vector store, proceeding with new crawl")
             else:
                 logger.info("Cached results not relevant enough, proceeding with new crawl")
-        
-        # If we get here, either:
-        # 1. force_crawl was True
-        # 2. strict was True
-        # 2. vector store didn't exist
-        # 3. or results weren't good enough
-        # So we proceed with normal crawl
         
         # Perform crawl
         crawler.crawl(
             prompt=prompt,
             urls=urls,
-            strict=strict
+            strict=strict,
+            num_results=n,
+            num_seed_urls=num_seed_urls,
+            max_depth=max_depth,
+            base_relevance_threshold=relevance_threshold
         )
         
-        # Create vector store from crawled content
-        crawler.create_vector_store()
+        # Query the vector store to get results
+        results = crawler.query(prompt, n=n, strict=strict)
         
-        # Query the vector store
-        results = crawler.query(prompt, k=k, strict=strict)
+        # Generate LLM response if requested
+        llm_response = None
+        if use_llm and results:
+            llm_response = generate_llm_response(results, prompt)
         
         # Prepare metadata about the crawl
         metadata = {
@@ -103,11 +118,16 @@ def perform_crawl_and_query(
             "from_cache": False
         }
         
-        return {
+        response = {
             "status": "success",
             "results": results,
             "metadata": metadata
         }
+        
+        if llm_response:
+            response["llm_response"] = llm_response
+            
+        return response
         
     except Exception as e:
         if 'logger' in locals():
