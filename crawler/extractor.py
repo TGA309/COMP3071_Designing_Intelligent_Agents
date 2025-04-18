@@ -1,76 +1,249 @@
-# crawler/extractor.py
+# extractor.py (Updated to use readability-lxml)
+"""
+Handles fetching HTML content and extracting relevant text, code, and metadata from it.
+Uses readability-lxml for robust main content extraction.
+"""
+import requests
+from bs4 import BeautifulSoup
+from readability import Document
+from urllib.parse import urlparse, urljoin
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+import re
+import json # For parsing LD+JSON
 
-from urllib.parse import urlparse
+from crawler.logger import setup_logger
+from .utils import clean_text # Use clean_text from utils
 
-def extract_content(soup, url, pattern_memory, clean_text):
+logger = setup_logger()
+
+# --- Constants for Extraction ---
+# Tags often containing code blocks (still useful after readability)
+CODE_SELECTORS = ['pre', 'code', '.highlight', '.syntax', '.example-code', '[class*="language-"]']
+# Tags to remove completely before readability processing (optional, readability handles most)
+# STRIP_TAGS = ['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'noscript', 'iframe']
+# AD_SELECTORS = ['.ad', '.ads', '.advert', '.banner', '.sponsor', '[class*="advert"]', '[id*="ad"]']
+
+
+def fetch_page(url: str, timeout: int = 10) -> Optional[Tuple[str, str]]:
     """
-    Extract relevant content using learned patterns.
-    Removes unwanted elements and applies domain-specific extraction rules.
+    Fetches the HTML content of a URL.
+
+    Args:
+        url: The URL to fetch.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        A tuple (content, final_url) or None if fetching fails.
+        final_url accounts for redirects.
     """
-    # Remove unwanted elements
-    for element in soup.find_all(['script', 'style']):
-        element.decompose()
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
 
-    domain = urlparse(url).netloc
+        # Check content type - only process HTML
+        content_type = response.headers.get('content-type', '').lower()
+        if 'html' not in content_type:
+            logger.warning(f"Skipping non-HTML content at {url} (type: {content_type})")
+            return None
 
-    # Get or create pattern for domain
-    if domain not in pattern_memory:
-        pattern_memory[domain] = {
-            'content_tags': [
-                'article', 'main', '.content', '.documentation',
-                '.article-content', '.post-content', '.markdown-body',
-                '.technical-content', '.guide-content', 'body'  # Added body as fallback
-            ],
-            'code_blocks': ['pre', 'code', '.highlight', '.syntax', '.example-code'],
-            'headers': ['h1', 'h2', 'h3']
+        # Use apparent_encoding for robustness, fall back to utf-8
+        encoding = response.apparent_encoding or 'utf-8'
+        content = response.content.decode(encoding, errors='replace')
+
+        return content, response.url # Return final URL after redirects
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch {url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error fetching {url}: {e}", exc_info=True)
+        return None
+
+
+def parse_and_extract(html_content: str, url: str) -> Optional[Dict[str, any]]:
+    """
+    Parses HTML using readability-lxml to extract main content and metadata.
+
+    Args:
+        html_content: The HTML string.
+        url: The original URL (used for metadata and resolving links).
+
+    Returns:
+        A dictionary containing extracted data, or None if parsing fails
+        or no significant content is found.
+        Keys: 'url', 'domain', 'title', 'main_content', 'code_blocks',
+              'publish_date', 'links', 'content_length'
+    """
+    try:
+        doc = Document(html_content)
+        title = doc.title()
+        main_content_html = doc.summary() # Get the cleaned HTML of the main content
+        domain = urlparse(url).netloc
+
+        # --- Extract Text from Main Content ---
+        # Parse the cleaned HTML fragment to get text
+        soup_main = BeautifulSoup(main_content_html, 'html.parser')
+        main_content_text = soup_main.get_text(separator='\n', strip=True)
+        main_content_text_cleaned = clean_text(main_content_text) # Further clean (remove URLs etc.)
+
+        if not main_content_text_cleaned or len(main_content_text_cleaned.split()) < 30: # Lowered threshold slightly
+             logger.info(f"Readability found no significant main content for {url}")
+             return None
+
+        # --- Metadata Extraction (using original soup) ---
+        soup_orig = BeautifulSoup(html_content, 'html.parser')
+        publish_date = _extract_publish_date(soup_orig) # Extract date from original page
+
+        # --- Code Block Extraction (from original soup or main content soup) ---
+        # Extracting from original might be better if readability removes code blocks
+        code_blocks = _extract_code_blocks(soup_orig)
+
+        # --- Link Extraction (from original soup) ---
+        links = _extract_links(soup_orig, url) # Extract links relative to the *original* URL
+
+        # --- Assemble Result ---
+        extracted_data = {
+            'url': url,
+            'domain': domain,
+            'title': title,
+            'main_content': main_content_text_cleaned, # Use cleaned text
+            'code_blocks': code_blocks,
+            'publish_date': publish_date,
+            'links': links,
+            'content_length': len(main_content_text_cleaned.split()), # Word count of cleaned text
         }
 
-    patterns = pattern_memory[domain]
-    content_blocks = []
+        return extracted_data
 
-    # Extract main content
-    for tag in patterns['content_tags']:
-        if '.' in tag:
-            tag_name, class_name = tag.split('.')
-            if tag_name == '':
-                elements = soup.find_all(class_=class_name)
-            else:
-                elements = soup.find_all(tag_name, class_=class_name)
-        else:
-            elements = soup.find_all(tag)
+    except Exception as e:
+        logger.error(f"Error parsing or extracting content from {url} using readability: {e}", exc_info=True)
+        return None
 
-        for element in elements:
-            text = clean_text(element.get_text(separator=' '))
-            if len(text) > 20:  # Reduced from 50 to be more lenient
-                content_blocks.append(text)
 
-    # Always fallback to body if nothing else worked
-    if not content_blocks:
-        body = soup.find('body')
-        if body:
-            text = clean_text(body.get_text(separator=' '))
-            content_blocks.append(text)
+# --- Helper Functions (kept for metadata, links, code) ---
 
-    # Extract code blocks
+def _extract_code_blocks(soup: BeautifulSoup) -> List[str]:
+    """Extracts text content from code-related tags."""
     code_blocks = []
-    for tag in patterns['code_blocks']:
-        elements = soup.find_all(tag)
-        for element in elements:
-            code = element.get_text(strip=True)
-            if code:  # Accept any code, no length restriction
-                code_blocks.append(code)
+    for selector in CODE_SELECTORS:
+        try:
+            if selector.startswith('.'):
+                 elements = soup.find_all(class_=selector[1:])
+            elif selector.startswith('['):
+                 match = re.match(r'\[([\w-]+)\*="([^"]+)"\]', selector)
+                 if match:
+                     attr, value_part = match.groups()
+                     elements = soup.find_all(lambda tag: tag.has_attr(attr) and value_part in tag[attr])
+                 else:
+                     elements = []
+            else: # Tag name
+                elements = soup.find_all(selector)
 
-    return {
-        'url': url,
-        'content': ' '.join(content_blocks),
-        'code_blocks': code_blocks,
-        'domain': domain
+            for element in elements:
+                # Get text, preserving structure within the code block
+                code = element.get_text(strip=False) # Keep internal whitespace
+                if code:
+                    code_blocks.append(code.strip()) # Strip leading/trailing only
+        except Exception as e:
+            logger.warning(f"Error extracting code with selector '{selector}': {e}")
+
+    # Simple deduplication
+    return list(dict.fromkeys(code_blocks))
+
+
+def _extract_publish_date(soup: BeautifulSoup) -> Optional[datetime]:
+    """Extracts publication date from various common metadata locations."""
+    date_str = None
+    # 1. Common meta tags
+    meta_selectors = {
+        'property': ['article:published_time', 'og:published_time'],
+        'name': ['pubdate', 'publishdate', 'date', 'dc.date.issued', 'dcterms.created']
     }
+    for attr, names in meta_selectors.items():
+        for name in names:
+            meta = soup.find('meta', attrs={attr: name})
+            if meta and meta.get('content'):
+                date_str = meta['content']
+                break
+        if date_str: break
+
+    # 2. Time tag
+    if not date_str:
+        time_tag = soup.find('time', attrs={'datetime': True})
+        if time_tag:
+            date_str = time_tag['datetime']
+
+    # 3. Schema.org (JSON-LD)
+    if not date_str:
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                data = json.loads(script.string)
+                # Look in common places within JSON-LD
+                if isinstance(data, dict):
+                    potential_dates = [
+                        data.get('datePublished'),
+                        data.get('uploadDate'), # Youtube/VideoObject
+                        data.get('@graph', [{}])[0].get('datePublished') # Sometimes nested
+                    ]
+                    for potential_date in potential_dates:
+                        if isinstance(potential_date, str):
+                            date_str = potential_date
+                            break
+                elif isinstance(data, list): # Handle array of objects
+                     for item in data:
+                         if isinstance(item, dict) and item.get('datePublished'):
+                             date_str = item['datePublished']
+                             break
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                logger.debug(f"Could not parse JSON-LD for date: {e}")
+            if date_str: break
+
+    # --- Parse the date string ---
+    if date_str:
+        try:
+            # Handle ISO format with potential 'Z' or timezone offsets
+            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            # Ensure timezone-aware (assume UTC if naive)
+            if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+                 logger.debug(f"Assuming UTC for naive datetime: {date_str}")
+                 return dt.replace(tzinfo=timezone.utc)
+            return dt
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Could not parse extracted date string '{date_str}': {e}")
+
+    return None # No date found or parsed
 
 
-def update_patterns(successful_content, pattern_memory):
-    """Update extraction patterns based on successful extractions."""
-    domain = successful_content['domain']
-    
-    if len(successful_content['content']) > 100:
-        pattern_memory[domain]['success_count'] = pattern_memory[domain].get('success_count', 0) + 1
+def _extract_links(soup: BeautifulSoup, base_url: str) -> List[str]:
+    """Extracts absolute links from the page, staying within the same domain."""
+    links = set() # Use set for automatic deduplication
+    base_domain = urlparse(base_url).netloc
+
+    for element in soup.find_all(['a', 'link'], href=True): # Include <link> tags too
+        href = element['href']
+
+        # Basic filtering
+        if not href or href.startswith(('#', 'javascript:', 'mailto:', 'tel:')) or len(href) > 500:
+            continue
+
+        try:
+            # Resolve relative URLs
+            absolute_url = urljoin(base_url, href.strip())
+            parsed_absolute = urlparse(absolute_url)
+
+            # Check scheme and domain
+            if parsed_absolute.scheme in ['http', 'https'] and parsed_absolute.netloc == base_domain:
+                # Optional: Normalize URL (remove fragment)
+                normalized_url = parsed_absolute._replace(fragment="").geturl()
+                links.add(normalized_url)
+
+        except ValueError:
+            logger.debug(f"Could not parse or join URL: base='{base_url}', href='{href}'")
+        except Exception as e:
+            logger.warning(f"Error processing link '{href}' on page {base_url}: {e}")
+
+    return list(links)

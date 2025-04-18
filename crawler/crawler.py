@@ -1,507 +1,307 @@
-# crawler/crawler.py
-import requests
-from typing import List, Dict, Optional, Set, Tuple
-from bs4 import BeautifulSoup
-from huggingface_hub import snapshot_download
-from langchain_huggingface import HuggingFaceEmbeddings
-import re
-from queue import PriorityQueue
+# crawler.py (Updated)
+"""
+Core Adaptive Web Crawler implementation.
+Manages the crawling process, fetching, extraction, scoring, and interaction
+with the store module. Uses parallel processing for efficiency.
+"""
 import concurrent.futures
+import time
+from typing import List, Dict, Optional, Set, Tuple
 
-# Import our modularized components and config
+# Import project components
 from config import config
 from crawler.logger import setup_logger
-from crawler.utils import clean_text
+from crawler.utils import is_valid_url, extract_keywords
 from crawler.search import perform_search
-from crawler import extractor, store
+from crawler import extractor # Use the refactored extractor
 from crawler.heuristics import ContentHeuristics
+from crawler.store import builder, persistence, scorer # Use the new store modules
 
 class AdaptiveWebCrawler:
+    # Removed parameters from __init__ as they are request-specific
     def __init__(self):
-        # Initially, no seed urls are set.
-        self.seed_urls: List[str] = []
-        self.visited_urls = set()
-        self.content_store = []
-        self.pattern_memory = {}
+        """Initializes the crawler."""
         self.logger = setup_logger()
         self.heuristics = ContentHeuristics()
-        
-        # Setup model caching
-        model_path = config.model.MODEL_CACHE_DIR / config.model.MODEL_NAME.split('/')[-1]
-        if not model_path.exists():
-            self.logger.info(f"Downloading model {config.model.MODEL_NAME} for first time use...")
-            snapshot_download(repo_id=config.model.MODEL_NAME, local_dir=str(model_path))
-            
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=str(model_path),
-            cache_folder=str(config.model.MODEL_CACHE_DIR)
-        )
-        
-        self.vector_store = None
-        
-    def crawl(self, prompt: str, urls: Optional[List[str]] = None, strict: bool = False, num_results: int = 3, num_seed_urls: int = 5, max_depth: int = 5, base_relevance_threshold: float = 0.5):
+
+        # State managed externally, loaded/saved via persistence
+        self.visited_urls: Set[str] = set()
+        # self.content_hashes are managed within heuristics instance
+
+        # Configuration shortcuts (used if not overridden by crawl method)
+        self.default_max_depth = config.api.crawl.max_depth
+        self.default_num_results = config.api.crawl.num_results
+        self.default_num_seed_urls = config.api.crawl.num_seed_urls
+        self.default_base_relevance_threshold = config.api.crawl.relevance_threshold
+
+        self.min_crawl_relevance = config.crawler.minimum_relevance_threshold
+        self.depth_relevance_step = config.crawler.depth_relevance_step
+        self.max_workers = config.crawler.max_parallel_requests
+        self.batch_size = config.crawler.batch_size
+
+        self.logger.info("AdaptiveWebCrawler initialized.")
+        # Load state immediately on initialization
+        self._load_crawler_state()
+
+    def _load_crawler_state(self):
+        """Loads visited URLs and content store from persistence."""
+        self.logger.info("Attempting to load previous crawler state...")
+        # load_state now returns visited_urls, content_hashes
+        # It also calls builder.initialize_store internally
+        loaded_visited, loaded_hashes = persistence.load_state()
+        self.visited_urls = loaded_visited
+        self.heuristics.load_hashes(loaded_hashes) # Load hashes into heuristics instance
+        self.logger.info(f"Loaded state: {len(self.visited_urls)} visited URLs, "
+                         f"{len(self.heuristics.content_hashes)} content hashes, "
+                         f"{len(builder.get_content_store())} items in content store.")
+
+    def _save_crawler_state(self):
+        """Saves the current crawler state."""
+        self.logger.info("Saving crawler state...")
+        persistence.save_state(self.visited_urls, self.heuristics.content_hashes)
+        self.logger.info("Crawler state saved.")
+
+    # Added parameters back to crawl method signature
+    def crawl(self, prompt: str, urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None, max_depth: Optional[int] = None, base_relevance_threshold: Optional[float] = None):
         """
-        Starts the crawl process with enhanced heuristics and depth crawling.
-        
+        Starts the crawl process with stricter batch-by-batch processing per depth.
+
         Args:
-            prompt: User query
-            urls: Optional seed URLs
-            strict: Whether to use only provided URLs
-            num_seed_urls: Number of seed urls to get back from the search results
-            max_depth: Maximum crawl depth
+            prompt: User query/prompt.
+            urls: Optional list of initial URLs to crawl.
+            num_seed_urls: Number of URLs to fetch from search if `urls` is not provided. Uses default if None.
+            max_depth: Override the maximum crawl depth. Uses default if None.
+            base_relevance_threshold: Starting relevance threshold for depth 0. Uses default if None.
         """
-        # Extract keywords from prompt for heuristic matching
-        prompt_keywords = self._extract_keywords(prompt)
-        self.logger.info(f"Extracted keywords from prompt: {prompt_keywords}")
-        
-        # Load saved state (visited URLs, content hashes, content_store and vector store) if available
-        self.visited_urls, self.heuristics.content_hashes, self.content_store, self.vector_store = store.load_state(self.logger, self.embeddings)
-        
-        # Determine the seed URLs based on the provided input:
-        if strict:
-            # Case 3: Use only provided URLs (or if none, fall back to search results)
-            self.seed_urls = urls if urls is not None else perform_search(prompt, num_seed_urls)
+        # Use provided parameters or fall back to defaults stored in self
+        current_num_seed_urls = num_seed_urls if num_seed_urls is not None else self.default_num_seed_urls
+        current_max_depth = max_depth if max_depth is not None else self.default_max_depth
+        current_base_relevance_threshold = base_relevance_threshold if base_relevance_threshold is not None else self.default_base_relevance_threshold
+
+        self.logger.info(f"Starting crawl for prompt: '{prompt}'")
+        self.logger.info(f"Crawl Params: num_seed={current_num_seed_urls}, max_depth={current_max_depth}, base_relevance={current_base_relevance_threshold}")
+        prompt_keywords = extract_keywords(prompt)
+        self.logger.info(f"Using keywords for scoring: {prompt_keywords}")
+
+        # --- Determine Seed URLs ---
+        if urls:
+            seed_urls = list(set(filter(is_valid_url, urls))) # Filter invalid URLs
+            # Combine provided URLs with search results
+            search_results = perform_search(prompt, current_num_seed_urls)
+            seed_urls = list(set(seed_urls) | set(search_results)) # Use set union for unique URLs
+            self.logger.info(f"Using provided valid seed URLs combined with search results: {len(seed_urls)}")
         else:
-            if urls is None:
-                # Case 1: Only prompt provided.
-                self.seed_urls = perform_search(prompt, num_seed_urls)
-            else:
-                # Case 2: Both prompt and urls provided; combine search results with user URLs.
-                search_results = perform_search(prompt, num_seed_urls)
-                # Use a set to deduplicate.
-                self.seed_urls = list(set(urls) | set(search_results))
-                
-        self.logger.info(f"Using {len(self.seed_urls)} seed URLs for crawling.")
-        
-        # Start with seed URLs (depth 0)
+            self.logger.info(f"No URLs provided, performing search for {current_num_seed_urls} seed URLs...")
+            seed_urls = perform_search(prompt, current_num_seed_urls)
+            self.logger.info(f"Obtained seed URLs from search: {len(seed_urls)}")
+
+        if not seed_urls:
+            self.logger.warning("No valid seed URLs found. Stopping crawl.")
+            return
+
+        # --- Crawling Loop ---
         current_depth = 0
-        urls_to_crawl = self.seed_urls.copy()
-        all_discovered_urls = set(urls_to_crawl)
+        urls_to_crawl_this_depth = [url for url in seed_urls if url not in self.visited_urls]
+        all_discovered_urls = set(urls_to_crawl_this_depth) | self.visited_urls # Track all URLs encountered
 
-        while current_depth <= max_depth and urls_to_crawl:
-            self.logger.info(f"Starting crawl at depth {current_depth}")
-            
-            # Calculate relevance threshold for current depth
-            relevance_threshold = max(
-                config.crawler.minimum_relevance_threshold,
-                base_relevance_threshold - (current_depth * config.crawler.depth_relevance_step)
+        while current_depth <= current_max_depth and urls_to_crawl_this_depth:
+            self.logger.info(f"\n--- Starting Crawl Depth {current_depth} ---")
+            self.logger.info(f"URLs to process at this depth: {len(urls_to_crawl_this_depth)}")
+
+            # Calculate relevance threshold for this depth
+            current_depth_relevance_threshold = max(
+                self.min_crawl_relevance,
+                current_base_relevance_threshold - (current_depth * self.depth_relevance_step)
             )
-            self.logger.info(f"Using relevance threshold: {relevance_threshold} for depth {current_depth}")
-            
-            # Process URLs at current depth
-            next_urls, found_relevant_results = self._process_urls_at_depth(
-                urls_to_crawl, 
-                prompt_keywords,
-                prompt,
-                relevance_threshold,
-                current_depth,
-                strict,
-                num_results,
-                config.crawler.batch_size
-            )
-            
-            # If relevant results were found during batch processing, stop crawling
-            if found_relevant_results:
-                self.logger.info(f"Found relevant results during batch processing at depth {current_depth}")
-                break
+            self.logger.info(f"Relevance threshold for depth {current_depth}: {current_depth_relevance_threshold:.2f}")
 
-            # Update stores with new content
-            self._update_stores()
+            next_depth_urls_discovered: Set[str] = set()
+            processed_count_total_this_depth = 0
+            stop_early = False # Flag to break outer loop if stopping early
 
-            # Query stores and check relevance
-            results = self.query(prompt, n=num_results, strict=strict)
-            if results and all(r['score'] >= relevance_threshold for r in results):
-                self.logger.info(f"Found relevant results at depth {current_depth}")
-                break
+            # --- Process URLs in Strict Batches ---
+            for i in range(0, len(urls_to_crawl_this_depth), self.batch_size):
+                batch_urls = urls_to_crawl_this_depth[i : i + self.batch_size]
+                self.logger.info(f"--- Processing Batch {i // self.batch_size + 1} at Depth {current_depth} ({len(batch_urls)} URLs) ---")
 
-            # Filter out already visited or discovered URLs
-            next_urls = [url for url in next_urls if url not in all_discovered_urls and url not in self.visited_urls]
+                processed_count_this_batch = 0
+                batch_futures = {}
 
-            # Update tracking sets
-            all_discovered_urls.update(next_urls)
-            urls_to_crawl = next_urls
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    # Submit only the URLs for the current batch
+                    for url in batch_urls:
+                        if url not in self.visited_urls: # Double check before submitting
+                            future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth_relevance_threshold)
+                            batch_futures[future] = url
 
-            # Increment depth
+                    # Process completed futures for THIS BATCH ONLY
+                    for future in concurrent.futures.as_completed(batch_futures):
+                        url = batch_futures[future]
+                        try:
+                            result_links = future.result() # Returns list of discovered links or None
+                            processed_count_this_batch += 1
+                            processed_count_total_this_depth += 1
+                            self.visited_urls.add(url) # Mark as visited *after* successful processing
+
+                            if result_links is not None:
+                                # Add newly discovered, valid, unvisited links for the next depth
+                                new_links_count = 0
+                                for link in result_links:
+                                    if is_valid_url(link) and link not in all_discovered_urls:
+                                        next_depth_urls_discovered.add(link)
+                                        all_discovered_urls.add(link) # Add to global discovered set
+                                        new_links_count += 1
+                                if new_links_count > 0:
+                                    self.logger.debug(f"Discovered {new_links_count} new URLs from {url}")
+
+                        except Exception as exc:
+                            self.logger.error(f"URL {url} generated an exception during processing: {exc}", exc_info=False)
+                            self.visited_urls.add(url) # Mark as visited even if failed to prevent retries
+
+                self.logger.info(f"--- Batch {i // self.batch_size + 1} Complete (Processed {processed_count_this_batch} URLs) ---")
+
+                # --- Check for early stopping AFTER each batch is fully processed ---
+                self.logger.debug(f"Checking early stop condition after batch {i // self.batch_size + 1}.")
+                query_results = self.query(prompt, n=self.default_num_results)
+
+                if query_results:
+                    scores = [r['score'] for r in query_results]
+                    self.logger.debug(f"Checking scores for early stop: {scores} against threshold {current_depth_relevance_threshold:.2f}")
+                    if len(query_results) >= self.default_num_results and all(r['score'] >= current_depth_relevance_threshold for r in query_results):
+                        self.logger.info(f"Found {len(query_results)} relevant results meeting threshold {current_depth_relevance_threshold:.2f}. Stopping crawl early.")
+                        stop_early = True
+                        break # Exit the batch loop for this depth
+                else:
+                    self.logger.debug("No query results found for early stop check.")
+
+            # --- End of Batch Loop ---
+
+            if stop_early:
+                break # Exit the depth loop
+
+            # --- Prepare for Next Depth ---
+            self.logger.info(f"--- Depth {current_depth} Complete ---")
+            self.logger.info(f"Processed {processed_count_total_this_depth} URLs in total for this depth.")
+            self.logger.info(f"Discovered {len(next_depth_urls_discovered)} new unique URLs for next depth.")
+            self.logger.info(f"Total content items in store: {len(builder.get_content_store())}")
+
+            # Set up URLs for the next iteration
+            urls_to_crawl_this_depth = list(next_depth_urls_discovered)
             current_depth += 1
-            
-            # Status update
-            self.logger.info(f"Depth {current_depth-1} complete. Found {len(next_urls)} new URLs for next depth.")
-            self.logger.info(f"Total URLs discovered: {len(all_discovered_urls)}")
-            self.logger.info(f"Total content collected: {len(self.content_store)} pages")
-        
-        # Final save
-        if self.content_store:
-            self.vector_store = store.update_vector_store(
-                self.content_store,
-                self.vector_store,
-                self.embeddings
-            )
-            
-            store.save_state(self.visited_urls, self.heuristics.content_hashes, self.content_store, self.logger)
-        
-        # Final logging
-        urls_this_run = len([u for u in self.visited_urls if u in all_discovered_urls])
-        self.logger.info(f"Crawling complete.")
-        self.logger.info(f"URLs processed:")
-        self.logger.info(f" Visited this run: {urls_this_run}")
-        self.logger.info(f" Historical total: {len(self.visited_urls)}")
-        self.logger.info(f"Collected content from {len(self.content_store)} pages.")
-    
 
-    def _update_stores(self):
-        """Update vector store and content store with new content."""
-        if self.content_store:
-            self.vector_store = store.update_vector_store(
-                self.content_store,
-                self.vector_store,
-                self.embeddings
-            )
-            store.save_state(self.visited_urls, self.heuristics.content_hashes, self.content_store, self.logger)
-        self.logger.info("Updated stores with new content.")
-    
-    
-    def _process_urls_at_depth(self, urls: List[str], prompt_keywords: List[str],
-                          prompt: str, relevance_threshold: float, depth: int,
-                          strict: bool = False, num_results: int = 3,
-                          batch_size: int = 10) -> Tuple[List[str], bool]:
-        """
-        Process URLs at the current depth level in batches with parallel processing.
-        
-        Returns:
-            Tuple of (next_urls, found_relevant_results)
-        """
-        next_urls = []
-        found_relevant_results = False
-        
-        # Process URLs in batches
-        for i in range(0, len(urls), batch_size):
-            batch_urls = urls[i:i+batch_size]
-            self.logger.info(f"Processing batch {i//batch_size + 1} of {(len(urls) + batch_size - 1)//batch_size}")
-            
-            # Skip already visited URLs
-            batch_urls = [url for url in batch_urls if url not in self.visited_urls]
-            
-            if not batch_urls:
-                continue
-                
-            # Parallelize URL evaluation
-            url_scores = self._parallel_evaluate_urls(batch_urls, prompt_keywords)
-            
-            # Sort URLs by score for prioritized crawling
-            prioritized_urls = sorted(url_scores.items(), key=lambda x: x[1][0], reverse=True)
-            
-            # Process URLs (sequentially for depth 0, in parallel for depths > 0)
-            if depth == 0:
-                for url, (score, soup, metadata) in prioritized_urls:
-                    extracted_urls = self._process_single_url(url, score, soup, metadata)
-                    next_urls.extend(extracted_urls)
-            else:
-                # For deeper levels, use parallel processing
-                extracted_urls = self._parallel_process_urls(prioritized_urls)
-                next_urls.extend(extracted_urls)
-            
-            # Update stores with new content after each batch
-            self._update_stores()
-            
-            # Check if we have relevant results after processing this batch
-            results = self.query(prompt, n=num_results, strict=strict)
-            if results and all(r['score'] >= relevance_threshold for r in results):
-                self.logger.info(f"Found relevant results after processing batch {i//batch_size + 1}")
-                found_relevant_results = True
-                break
-        
-        return next_urls, found_relevant_results
+            # Periodic save state (consider saving after each depth or less frequently)
+            if current_depth % config.crawler.save_frequency == 0:
+                 self._save_crawler_state()
 
+        # --- Finalization ---
+        self.logger.info(f"Crawling finished (max depth {current_max_depth} reached, stopped early, or no more URLs).")
+        self._save_crawler_state() # Final save
 
-    def _parallel_evaluate_urls(self, urls: List[str], prompt_keywords: List[str]) -> Dict[str, Tuple]:
+    def _process_single_url(self, url: str, prompt_keywords: List[str], relevance_threshold: float) -> Optional[List[str]]:
         """
-        Evaluate URLs in parallel to calculate their relevance scores.
-        """
-        url_scores = {}
-        
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(config.crawler.max_parallel_requests, len(urls))
-        ) as executor:
-            future_to_url = {
-                executor.submit(self._evaluate_single_url, url, prompt_keywords): url 
-                for url in urls
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    result = future.result()
-                    if result:
-                        score, soup, metadata = result
-                        if score >= config.crawler.url_relevance_threshold:
-                            url_scores[url] = (score, soup, metadata)
-                            self.logger.info(f"URL {url} received score: {score:.2f}")
-                        else:
-                            self.logger.info(f"URL {url} discarded due to low relevance score: {score:.2f}")
-                except Exception as e:
-                    self.logger.error(f"Error evaluating {url}: {str(e)}")
-                    self.visited_urls.add(url)
-        
-        return url_scores
+        Fetches, extracts, scores, and stores content for a single URL.
 
-    def _evaluate_single_url(self, url: str, prompt_keywords: List[str]):
-        """
-        Evaluate a single URL to calculate its relevance score.
-        """
-        try:
-            self.logger.info(f"Evaluating: {url}")
-            response = requests.get(url, timeout=10)
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Calculate page score using heuristics
-            score, metadata = self.heuristics.calculate_page_score(soup, url, prompt_keywords)
-            return (score, soup, metadata)
-        except Exception as e:
-            self.logger.error(f"Error evaluating {url}: {str(e)}")
-            return None
-
-    def _parallel_process_urls(self, prioritized_urls: List[Tuple[str, Tuple]]) -> List[str]:
-        """
-        Process URLs in parallel to extract content and links.
-        
         Args:
-            prioritized_urls: List of (url, (score, soup, metadata)) tuples
-            
-        Returns:
-            List of new URLs discovered
-        """
-        all_next_urls = []
-        
-        # Check if there are any URLs to process
-        if not prioritized_urls:
-            self.logger.warning("No URLs to process in parallel (all were filtered out)")
-            return all_next_urls
-        
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(config.crawler.max_parallel_requests, len(prioritized_urls))
-        ) as executor:
-            future_to_url = {
-                executor.submit(self._process_single_url, url, score, soup, metadata): url 
-                for url, (score, soup, metadata) in prioritized_urls
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    extracted_urls = future.result()
-                    all_next_urls.extend(extracted_urls)
-                    self.logger.info(f"Processed URL {url}, found {len(extracted_urls)} new URLs")
-                except Exception as e:
-                    self.logger.error(f"Error processing {url}: {str(e)}")
-                    self.visited_urls.add(url)
-        
-        return all_next_urls
+            url: The URL to process.
+            prompt_keywords: Keywords for scoring relevance.
+            relevance_threshold: The minimum heuristic score needed for this depth.
 
+        Returns:
+            A list of discovered valid links from the page, or None if processing fails
+            or content is deemed irrelevant/duplicate.
+        """
+        self.logger.debug(f"Processing URL: {url}")
 
-    def _process_single_url(self, url: str, score: float, soup: BeautifulSoup,
-                       metadata: Dict) -> List[str]:
-        """
-        Process a single URL and extract content and links.
-        
-        Args:
-            url: URL to process
-            score: Relevance score
-            soup: BeautifulSoup object
-            metadata: URL metadata
-            
-        Returns:
-            List of new URLs discovered
-        """
-        extracted_urls = []
-        
-        try:
-            self.logger.info(f"Processing URL: {url} (score: {score:.2f})")
-            
-            # Extract content using our extractor
-            content = extractor.extract_content(soup, url, self.pattern_memory, clean_text)
-            
-            # Check if content should be processed
-            if content['content'] and self.heuristics.should_process_content(content['content'], url):
-                # Add metadata from heuristics
-                content.update(metadata)
-                self.content_store.append(content)
-            else:
-                self.logger.info(f"Content from {url} was filtered out (too short or duplicate)")
-            
-            # Extract links for next depth - do this regardless of content quality
-            extracted_urls = self._extract_links(soup, url)
-            
-            self.visited_urls.add(url)
-                
-        except Exception as e:
-            self.logger.error(f"Error processing {url}: {str(e)}")
-            self.visited_urls.add(url)
-        
-        return extracted_urls
-    
-    def _extract_links(self, soup: BeautifulSoup, base_url: str) -> List[str]:
-        """
-        Extract links from a page for the next crawl depth.
-        
-        Args:
-            soup: BeautifulSoup object
-            base_url: Base URL for resolving relative links
-            
-        Returns:
-            List of absolute URLs
-        """
-        from urllib.parse import urljoin, urlparse
-        
-        links = []
-        
-        # Find all elements with 'href' attribute, not just 'a' tags
-        for element in soup.find_all(href=True):
-            href = element['href']
-            
-            # Skip empty links, anchors, javascript, mailto, etc.
-            if not href or href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
-                continue
-            
-            # Convert relative URLs to absolute
-            absolute_url = urljoin(base_url, href)
-            
-            # Skip URLs from different domains (optional, remove if you want to follow external links)
-            base_domain = urlparse(base_url).netloc
-            link_domain = urlparse(absolute_url).netloc
-            
-            if base_domain != link_domain:
-                continue
-            
-            # Add URL to the list if it's not already visited
-            if absolute_url not in self.visited_urls:
-                links.append(absolute_url)
-        
-        return links
+        # 1. Fetch Page
+        fetch_result = extractor.fetch_page(url)
+        if not fetch_result:
+            return None # Fetch failed
+        html_content, final_url = fetch_result
 
-    
-    def _save_progress(self):
-        """Save current progress to disk."""
-        self.vector_store = store.update_vector_store(
-            self.content_store,
-            self.vector_store,
-            self.embeddings
-        )
-        
-        store.save_state(self.visited_urls, self.heuristics.content_hashes, self.content_store, self.logger)
-        self.logger.info("Saved current progress.")
-    
-    def create_vector_store(self):
-        """Create the vector store from crawled content."""
-        self.vector_store = store.create_vector_store(self.content_store, self.embeddings, self.logger)
-    
-    def query(self, question: str, n: int = 3, strict: bool = False) -> List[Dict]:
-        """
-        Query the vector store for relevant content using hybrid scoring.
-        
-        Args:
-            question: The query string
-            n: Number of results to return
-            strict: Whether to restrict results to seed URLs only
-            
-        Returns:
-            List of relevant documents with metadata and hybrid scores
-        """
-        if not self.vector_store:
-            if not self.content_store:
-                # Return empty results if no content available
-                return []
-            else:
-                raise ValueError("Vector store not created. Run create_vector_store() first.")
-        
-        # Get more results than needed since we might filter some out in strict mode
-        buffer_n = n * 3 if strict else n
-        
-        # Get FAISS vector similarity results
-        faiss_results = self.vector_store.similarity_search_with_relevance_scores(question, k=buffer_n)
-        
-        # Get TF-IDF cosine similarity results
-        tfidf_results = store.tfidf_similarity_search(self.content_store, question, k=buffer_n)
-        
-        # Combine results with weighted scoring (70% FAISS, 30% TF-IDF)
-        combined_results = self._combine_search_results(faiss_results, tfidf_results, faiss_weight=config.store.weights['faiss'])
-        
-        if strict and self.seed_urls:
-            # Filter results to only include those from seed URLs
-            filtered_results = []
-            for doc, score in combined_results:
-                # Check if the document's source URL is in seed_urls
-                if doc.metadata['source'] in self.seed_urls:
-                    filtered_results.append((doc, score))
-                
-                # Break if we have enough results
-                if len(filtered_results) >= n:
-                    break
-            
-            # Use filtered results
-            results = filtered_results[:n]
+        # Handle redirects: update visited_urls if redirected
+        if final_url != url:
+            self.logger.info(f"URL redirected: {url} -> {final_url}")
+            if final_url in self.visited_urls:
+                self.logger.info(f"Redirected URL {final_url} already visited. Skipping.")
+                self.visited_urls.add(url) # Mark original URL as visited too
+                return None
+            url = final_url # Process the final URL
+
+        # 2. Extract Content (Now uses readability)
+        extracted_data = extractor.parse_and_extract(html_content, url)
+        if not extracted_data:
+            self.logger.debug(f"Extraction failed or no significant content for {url}")
+            return None # Extraction failed or content too sparse
+
+        # 3. Score Page Relevance (Heuristic Score - applied to readability output)
+        page_score = self.heuristics.calculate_page_score(extracted_data, prompt_keywords)
+        extracted_data['heuristic_score'] = page_score # Add score to data
+        self.logger.info(f"Heuristic score for {url}: {page_score:.3f}")
+
+        # 4. Check if content should be processed (Duplicate Check & Basic Quality)
+        # Pass the cleaned main content text for hashing
+        should_process = self.heuristics.should_process_content(extracted_data['main_content'], url)
+
+        if page_score >= relevance_threshold and should_process:
+            # 5. Add to Content Store (via builder)
+            builder.add_content(extracted_data)
+            self.logger.debug(f"Added content from {url} to store.")
+            # Return the links discovered on this relevant page
+            return extracted_data.get('links', [])
         else:
-            # In non-strict mode, just take top n
-            results = combined_results[:n]
-        
-        return [{
-            'content': doc.page_content,
-            'source': doc.metadata['source'],
-            'domain': doc.metadata['domain'],
-            'score': float(score),
-            'publish_date': doc.metadata.get('publish_date'),
-            'content_length': doc.metadata.get('content_length', 0)
-        } for doc, score in results]
+            if page_score < relevance_threshold:
+                 self.logger.info(f"Skipping store for {url}: Score {page_score:.3f} below threshold {relevance_threshold:.2f}")
+            if not should_process:
+                 # Reason logged within should_process_content (duplicate or empty)
+                 pass
+            # Even if not stored, return links if the page was reachable (helps exploration)
+            # Modify this if you only want links from *stored* pages
+            return extracted_data.get('links', [])
 
-    
-    def _extract_keywords(self, prompt: str) -> List[str]:
-        """Extract keywords from the prompt for heuristic matching."""
-        # Remove stop words and extract meaningful keywords
-        stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
-                     'be', 'been', 'being', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 
-                     'about', 'against', 'between', 'into', 'through', 'during', 'before', 
-                     'after', 'above', 'below', 'from', 'up', 'down', 'of', 'off', 'over', 
-                     'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 
-                     'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 
-                     'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 
-                     'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 
-                     'don', 'should', 'now'}
-        
-        # Tokenize and filter out stop words
-        words = re.findall(r'\b\w+\b', prompt.lower())
-        keywords = [word for word in words if word not in stop_words and len(word) > 2]
-        
-        # Add any phrases (2-3 consecutive words) that might be important
-        phrases = []
-        for i in range(len(words) - 1):
-            phrase = words[i] + ' ' + words[i+1]
-            if any(word not in stop_words for word in phrase.split()):
-                phrases.append(phrase)
-        
-        for i in range(len(words) - 2):
-            phrase = words[i] + ' ' + words[i+1] + ' ' + words[i+2]
-            if any(word not in stop_words for word in phrase.split()):
-                phrases.append(phrase)
-        
-        # Combine keywords and important phrases
-        all_keywords = keywords + phrases
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_keywords = [kw for kw in all_keywords if not (kw in seen or seen.add(kw))]
-        
-        # Limit to most important keywords (top 10)
-        return unique_keywords[:10]
-    
-    def _combine_search_results(self, faiss_results, tfidf_results, faiss_weight=config.store.weights['faiss']):
+    # Added parameter n back to query method
+    def query(self, question: str, n: Optional[int] = None) -> List[Dict]:
         """
-        Combine results from FAISS and TF-IDF with weighted scoring.
-        
+        Queries the crawled content store using TF-IDF similarity.
+
         Args:
-            faiss_results: List of (Document, score) tuples from FAISS
-            tfidf_results: List of (Document, score) tuples from TF-IDF
-            faiss_weight: Weight to give FAISS results (0-1)
-            
+            question: The query string.
+            n: Number of results to return. Uses default if None.
+
         Returns:
-            List of (Document, combined_score) tuples
+            List of relevant documents (dictionaries) with metadata and scores.
         """
-        return store.combine_search_results(faiss_results, tfidf_results, faiss_weight)
+        num_results_to_get = n if n is not None else self.default_num_results
+
+        self.logger.info(f"Querying content store for: '{question}' (top {num_results_to_get} results)")
+
+        # Use the store builder to get the current store
+        current_content_store = builder.get_content_store()
+        if len(current_content_store) == 0:
+            self.logger.warning("Query attempted on empty content store.")
+            return []
+
+        # Use the TF-IDF scorer
+        results = scorer.tfidf_similarity_search(query=question, k=num_results_to_get)
+
+        # Format results (scorer already adds 'score')
+        # Ensure required keys are present, add defaults if missing
+        formatted_results = []
+        for res in results:
+             formatted = {
+                 'content': res.get('main_content', ''), # Already fixed to main_content
+                 'source': res.get('url', 'N/A'),
+                 'title': res.get('title', 'N/A'),
+                 'domain': res.get('domain', 'N/A'),
+                 'score': res.get('score', 0.0), # TF-IDF score
+                 'publish_date': res.get('publish_date'), # Already datetime or None
+                 'content_length': res.get('content_length', 0),
+                 'heuristic_score': res.get('heuristic_score', 0.0) # Include heuristic score if available
+             }
+             formatted_results.append(formatted)
+
+        self.logger.info(f"Query returned {len(formatted_results)} results.")
+        # Log top result score for debugging
+        if formatted_results:
+             self.logger.debug(f"Top result score (TF-IDF): {formatted_results[0]['score']:.4f}")
+
+        return formatted_results

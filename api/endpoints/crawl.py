@@ -13,7 +13,6 @@ router = APIRouter()
 class CrawlRequest(BaseModel):
     user_prompt: str = Field(..., description="The user's query or prompt for the crawl operation")
     urls: Optional[List[str]] = Field(None, description="Optional list of URLs to crawl")
-    strict_flag: bool = Field(config.api.crawl.strict_flag, description="If True, only crawl the provided URLs")
     num_results: int = Field(config.api.crawl.num_results, description="Number of results to return from the query")
     max_depth: int = Field(config.api.crawl.max_depth, description="Maximum depth for the crawl operation")
     num_seed_urls: int = Field(config.api.crawl.num_seed_urls, description="Number of seed URLs to use for crawling")
@@ -28,7 +27,6 @@ async def crawl_endpoint(request: CrawlRequest):
     
     - **prompt**: Mandatory user query to search relevant content
     - **urls**: Optional list of URLs to crawl
-    - **strict_flag**: Optional flag to force using only the provided URL(s)
     - **num_results**: Number of results to return from the query
     - **max_depth**: Maximum depth for the crawl operation
     - **num_seed_urls**: Number of seed URLs to use for crawling
@@ -41,7 +39,6 @@ async def crawl_endpoint(request: CrawlRequest):
     crawl_response = perform_crawl_and_query(
         prompt=request.user_prompt,
         urls=request.urls,
-        strict=request.strict_flag,
         n=request.num_results,
         max_depth=request.max_depth,
         num_seed_urls=request.num_seed_urls,

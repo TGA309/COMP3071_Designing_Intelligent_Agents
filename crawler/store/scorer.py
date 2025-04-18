@@ -1,95 +1,89 @@
-# crawler/store/scorer.py
-from typing import List, Dict, Tuple
+# store/scorer.py
+"""
+Functions to score content relevance based on TF-IDF and cosine similarity.
+"""
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from typing import List, Dict, Any
 import numpy as np
-from langchain.schema import Document
 
-def tfidf_similarity_search(content_store, query, k=5):
+from crawler.logger import setup_logger
+from .builder import get_content_store # Import from builder
+
+logger = setup_logger()
+
+# Initialize TF-IDF vectorizer globally or within the function as needed
+# Global initialization might be slightly more efficient if called repeatedly
+# with the same corpus, but requires managing its state if the corpus changes.
+# Let's initialize it within the function for simplicity and to ensure it always
+# fits the current content store.
+
+def tfidf_similarity_search(query: str, k: int = 3) -> List[Dict[str, Any]]:
     """
-    Perform TF-IDF based cosine similarity search on content store.
-    
+    Performs a similarity search using TF-IDF and cosine similarity.
+
     Args:
-        content_store: List of content dictionaries
-        query: Query string
-        k: Number of results to return
-        
+        query: The search query string.
+        k: The number of top results to return.
+
     Returns:
-        List of (Document, score) tuples
+        A list of the top k content items (dictionaries), sorted by relevance score,
+        each augmented with a 'score' key. Returns empty list if store is empty.
     """
+    content_store = get_content_store()
+
     if not content_store:
+        logger.warning("Attempted TF-IDF search on an empty content store.")
         return []
-    
-    # Extract content from store
-    texts = [item['content'] for item in content_store]
-    
-    # Create TF-IDF vectorizer
-    vectorizer = TfidfVectorizer(stop_words='english')
-    
-    # Add query to the corpus to vectorize everything together
-    all_texts = texts + [query]
-    tfidf_matrix = vectorizer.fit_transform(all_texts)
-    
-    # Get the query vector (last row) and content vectors
-    query_vector = tfidf_matrix[-1]
-    content_vectors = tfidf_matrix[:-1]
-    
-    # Calculate cosine similarity
-    similarities = cosine_similarity(query_vector, content_vectors).flatten()
-    
-    # Get top k indices
-    top_indices = similarities.argsort()[-k:][::-1]
-    
-    # Create Document objects with metadata
-    results = []
-    for idx in top_indices:
-        doc = Document(
-            page_content=content_store[idx]['content'],
-            metadata={
-                'source': content_store[idx]['url'],
-                'domain': content_store[idx]['domain'],
-                'publish_date': content_store[idx].get('publish_date'),
-                'content_length': content_store[idx].get('content_length', 0),
-                'has_structured_content': content_store[idx].get('has_structured_content', False)
-            }
-        )
-        results.append((doc, float(similarities[idx])))
-    
-    return results
 
-def combine_search_results(faiss_results, tfidf_results, faiss_weight=0.7):
-    """
-    Combine results from FAISS and TF-IDF with weighted scoring.
-    Default weightage: 70% FAISS score and 30% Cosine score.
-    
-    Args:
-        faiss_results: List of (Document, score) tuples from FAISS
-        tfidf_results: List of (Document, score) tuples from TF-IDF
-        faiss_weight: Weight to give FAISS results (0-1)
-        
-    Returns:
-        List of (Document, combined_score) tuples
-    """
-    tfidf_weight = 1.0 - faiss_weight
-    
-    # Create dictionaries to store scores by document source
-    faiss_scores = {doc.metadata['source']: score for doc, score in faiss_results}
-    tfidf_scores = {doc.metadata['source']: score for doc, score in tfidf_results}
-    
-    # Combine all unique documents
-    all_docs = {}
-    for doc, _ in faiss_results + tfidf_results:
-        source = doc.metadata['source']
-        if source not in all_docs:
-            all_docs[source] = doc
-    
-    # Calculate combined scores
-    combined_results = []
-    for source, doc in all_docs.items():
-        faiss_score = faiss_scores.get(source, 0.0)
-        tfidf_score = tfidf_scores.get(source, 0.0)
-        combined_score = (faiss_score * faiss_weight) + (tfidf_score * tfidf_weight)
-        combined_results.append((doc, combined_score))
-    
-    # Sort by combined score
-    return sorted(combined_results, key=lambda x: x[1], reverse=True)
+    try:
+        # Extract the text content from each item in the store
+        # *** FIX: Use 'main_content' key instead of 'content' ***
+        documents = [item.get('main_content', '') for item in content_store]
+
+        # Ensure there's actual text content to process
+        if not any(documents):
+            logger.warning("Content store contains items but no text content found for TF-IDF (checked key 'main_content').")
+            return []
+
+        # Initialize and fit the TF-IDF vectorizer
+        vectorizer = TfidfVectorizer(stop_words='english', lowercase=True)
+        tfidf_matrix = vectorizer.fit_transform(documents)
+
+        # Transform the query using the same vectorizer
+        query_vector = vectorizer.transform([query])
+
+        print(query_vector)
+
+        # Calculate cosine similarity between the query and all documents
+        cosine_similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
+
+        # Get the indices of the top k documents, sorted by similarity score
+        # Ensure k is not larger than the number of documents
+        num_docs = len(documents)
+        actual_k = min(k, num_docs)
+        if actual_k <= 0:
+            return []
+
+        # Use argpartition for efficiency if k is much smaller than num_docs,
+        # otherwise argsort is fine. Let's use argsort for simplicity here.
+        # Get indices sorted by score in descending order
+        top_k_indices = np.argsort(cosine_similarities)[::-1][:actual_k]
+
+        # Create the results list
+        results = []
+        for i in top_k_indices:
+            score = cosine_similarities[i]
+            # Retrieve the original content item
+            content_item = content_store[i].copy() # Use copy to avoid modifying original store
+            content_item['score'] = float(score) # Add the score
+            results.append(content_item)
+
+        # Sort the final list by score (descending) - argsort might not guarantee order for same scores
+        results.sort(key=lambda x: x['score'], reverse=True)
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error during TF-IDF similarity search: {e}", exc_info=True)
+        return []
