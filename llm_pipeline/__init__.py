@@ -1,4 +1,4 @@
-from .base import MistralBase
+from .base import LLMBase, HuggingFaceLLM
 from .query_expansion import QueryExpansion
 
-__all__ = ['MistralBase', 'QueryExpansion']
+__all__ = ['LLMBase', 'HuggingFaceLLM', 'QueryExpansion']
