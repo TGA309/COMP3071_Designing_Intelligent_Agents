@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Set, Tuple
 # Import project components
 from config import config
 from crawler.logger import setup_logger
-from crawler.utils import is_valid_url, extract_keywords
+from crawler.utils import extract_keywords, is_valid_url
 from crawler.search import perform_search
 from crawler import extractor # Use the refactored extractor
 from crawler.heuristics import ContentHeuristics
@@ -62,7 +62,9 @@ class AdaptiveWebCrawler:
         self.logger.info("Crawler state saved.")
 
     # Added parameters back to crawl method signature
-    def crawl(self, prompt: str, urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None, max_depth: Optional[int] = None, base_relevance_threshold: Optional[float] = None):
+    def crawl(self, original_prompt: str, search_prompt: str, query_prompt: str, prompt_keywords:List[str], 
+               urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None, 
+               max_depth: Optional[int] = None, base_relevance_threshold: Optional[float] = None):
         """
         Starts the crawl process with stricter batch-by-batch processing per depth.
 
@@ -78,21 +80,20 @@ class AdaptiveWebCrawler:
         current_max_depth = max_depth if max_depth is not None else self.default_max_depth
         current_base_relevance_threshold = base_relevance_threshold if base_relevance_threshold is not None else self.default_base_relevance_threshold
 
-        self.logger.info(f"Starting crawl for prompt: '{prompt}'")
+        self.logger.info(f"Starting crawl for prompt: '{original_prompt}'")
         self.logger.info(f"Crawl Params: num_seed={current_num_seed_urls}, max_depth={current_max_depth}, base_relevance={current_base_relevance_threshold}")
-        prompt_keywords = extract_keywords(prompt)
         self.logger.info(f"Using keywords for scoring: {prompt_keywords}")
 
         # --- Determine Seed URLs ---
         if urls:
             seed_urls = list(set(filter(is_valid_url, urls))) # Filter invalid URLs
             # Combine provided URLs with search results
-            search_results = perform_search(prompt, current_num_seed_urls)
+            search_results = perform_search(search_prompt, current_num_seed_urls)
             seed_urls = list(set(seed_urls) | set(search_results)) # Use set union for unique URLs
             self.logger.info(f"Using provided valid seed URLs combined with search results: {len(seed_urls)}")
         else:
             self.logger.info(f"No URLs provided, performing search for {current_num_seed_urls} seed URLs...")
-            seed_urls = perform_search(prompt, current_num_seed_urls)
+            seed_urls = perform_search(search_prompt, current_num_seed_urls)
             self.logger.info(f"Obtained seed URLs from search: {len(seed_urls)}")
 
         if not seed_urls:
@@ -162,7 +163,7 @@ class AdaptiveWebCrawler:
 
                 # --- Check for early stopping AFTER each batch is fully processed ---
                 self.logger.debug(f"Checking early stop condition after batch {i // self.batch_size + 1}.")
-                query_results = self.query(prompt, n=self.default_num_results)
+                query_results = self.query(query_prompt, n=self.default_num_results)
 
                 if query_results:
                     scores = [r['score'] for r in query_results]
@@ -259,12 +260,12 @@ class AdaptiveWebCrawler:
             return extracted_data.get('links', [])
 
     # Added parameter n back to query method
-    def query(self, question: str, n: Optional[int] = None) -> List[Dict]:
+    def query(self, prompt: str, n: Optional[int] = None) -> List[Dict]:
         """
         Queries the crawled content store using TF-IDF similarity.
 
         Args:
-            question: The query string.
+            prompt: The query string.
             n: Number of results to return. Uses default if None.
 
         Returns:
@@ -272,7 +273,7 @@ class AdaptiveWebCrawler:
         """
         num_results_to_get = n if n is not None else self.default_num_results
 
-        self.logger.info(f"Querying content store for: '{question}' (top {num_results_to_get} results)")
+        self.logger.info(f"Querying content store for: '{prompt}' (top {num_results_to_get} results)")
 
         # Use the store builder to get the current store
         current_content_store = builder.get_content_store()
@@ -281,7 +282,7 @@ class AdaptiveWebCrawler:
             return []
 
         # Use the TF-IDF scorer
-        results = scorer.tfidf_similarity_search(query=question, k=num_results_to_get)
+        results = scorer.tfidf_similarity_search(query=prompt, k=num_results_to_get)
 
         # Format results (scorer already adds 'score')
         # Ensure required keys are present, add defaults if missing

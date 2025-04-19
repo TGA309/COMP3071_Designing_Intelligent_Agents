@@ -8,9 +8,10 @@ from typing import List, Dict, Optional
 
 from crawler.crawler import AdaptiveWebCrawler
 from crawler.store import builder # Import builder to get store length
-# from crawler.llm_response import generate_llm_response # Keep commented LLM import
+from crawler.llm_processing import query_expansion
 from crawler.logger import setup_logger
 from config import config # Use config for defaults
+from crawler.utils import format_keywords_for_store_query, extract_keywords, format_keywords_for_search
 
 logger = setup_logger()
 
@@ -22,7 +23,7 @@ def perform_crawl_and_query(
     max_depth: Optional[int] = None, # Allow overriding config default
     force_crawl: bool = False, # Flag to force crawl even if cache is sufficient
     relevance_threshold: Optional[float] = None, # Allow overriding config default
-    use_llm: bool = False # Keep LLM flag
+    use_llm_response: bool = False # LLM response flag
 ) -> Dict:
     """
     Performs a crawl operation based on a prompt and optional URLs,
@@ -45,6 +46,14 @@ def perform_crawl_and_query(
     if urls: logger.info(f"Provided URLs: {urls}")
     if force_crawl: logger.info("`force_crawl` flag is set, will crawl regardless of cache.")
 
+    # Do query expansion on prompt
+    original_prompt = prompt
+    query_expanded_list = query_expansion(prompt)
+    search_prompt = format_keywords_for_search(query_expanded_list)
+    query_prompt = format_keywords_for_store_query(query_expanded_list)
+    prompt_keywords = extract_keywords(query_prompt)
+    
+
     # Use provided parameters or fall back to config defaults
     num_results_final = n if n is not None else config.api.crawl.num_results
     num_seed_urls_final = num_seed_urls if num_seed_urls is not None else config.api.crawl.num_seed_urls
@@ -62,7 +71,7 @@ def perform_crawl_and_query(
         # 2. Check cache (existing store) before crawling if force_crawl is False
         if not force_crawl:
             logger.info("Checking existing store (cache) for relevant results...")
-            initial_results = crawler.query(prompt, n=num_results_final)
+            initial_results = crawler.query(query_prompt, n=num_results_final)
             # Check if enough results meet the base relevance threshold
             if initial_results and len(initial_results) >= num_results_final and all(r['score'] >= base_relevance_threshold_final for r in initial_results):
                 logger.info(f"Found {len(initial_results)} sufficient results in cache meeting threshold {base_relevance_threshold_final:.2f}. Skipping crawl.")
@@ -78,20 +87,22 @@ def perform_crawl_and_query(
         if not from_cache:
             logger.info("Starting crawl process...")
             crawler.crawl(
-                prompt=prompt,
+                original_prompt=original_prompt,
+                search_prompt=search_prompt,
+                query_prompt=query_prompt,
+                prompt_keywords=prompt_keywords,
                 urls=urls,
                 num_seed_urls=num_seed_urls_final,
                 max_depth=max_depth_final,
                 base_relevance_threshold=base_relevance_threshold_final
             )
             # Query again after crawling to get the final results
-            results = crawler.query(prompt, n=num_results_final)
+            results = crawler.query(query_prompt, n=num_results_final)
             logger.info("Crawl process finished.")
-
 
         # --- Generate LLM Response (Optional) ---
         llm_response = None
-        # if use_llm and results:
+        # if use_llm_response and results:
         #     try:
         #         logger.info("Generating LLM response...")
         #         # Assuming generate_llm_response exists and takes results + prompt

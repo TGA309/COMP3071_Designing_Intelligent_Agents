@@ -38,7 +38,6 @@ def tfidf_similarity_search(query: str, k: int = 3) -> List[Dict[str, Any]]:
 
     try:
         # Extract the text content from each item in the store
-        # *** FIX: Use 'main_content' key instead of 'content' ***
         documents = [item.get('main_content', '') for item in content_store]
 
         # Ensure there's actual text content to process
