@@ -7,6 +7,7 @@ import re
 import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Set, Optional
+from urllib.parse import urlparse, unquote
 
 from crawler.logger import setup_logger
 
@@ -151,3 +152,53 @@ class ContentHeuristics:
         # If all checks pass, add the hash and return True
         self.content_hashes.add(content_hash)
         return True
+    
+class URLHeuristics:
+    """
+    Selects URLs based on relevance to prompt keywords found within the URL string itself.
+    """
+    def __init__(self, prompt_keywords: List[str]):
+        """
+        Initializes the URL heuristics with the target keywords.
+
+        Args:
+            prompt_keywords: A list of keywords derived from the user's prompt.
+        """
+        self.prompt_keywords = [kw.lower() for kw in prompt_keywords]
+        self.min_keyword_matches = 1 # Minimum number of keywords needed in URL to be considered
+        logger.info(f"URLHeuristics initialized with keywords: {self.prompt_keywords}")
+
+    def _url_contains_keywords(self, url: str) -> bool:
+        """Checks if the decoded URL path/query contains any prompt keywords."""
+        if not self.prompt_keywords:
+            return True # If no keywords, don't filter based on URL
+
+        try:
+            parsed = urlparse(url)
+            # Decode URL encoding (%20 -> space, etc.) and convert to lowercase
+            path_query = unquote(parsed.path + '?' + parsed.query).lower()
+            # Simple check: count occurrences of keywords in the path and query
+            matches = sum(1 for kw in self.prompt_keywords if kw in path_query)
+            return matches >= self.min_keyword_matches
+        except Exception as e:
+            logger.warning(f"Could not parse or check keywords in URL {url}: {e}")
+            return False # Treat errors as non-matches
+
+    def select_best_urls(self, urls: List[str]) -> List[str]:
+        """
+        Filters a list of URLs, returning only those likely relevant based on keywords.
+
+        Args:
+            urls: A list of URLs to filter.
+
+        Returns:
+            A list containing only the URLs deemed relevant.
+        """
+        if not urls:
+            return []
+
+        selected_urls = [url for url in urls if self._url_contains_keywords(url)]
+        logger.info(f"URL Heuristics: Selected {len(selected_urls)} out of {len(urls)} URLs based on keywords.")
+        if len(urls) > 0 and len(selected_urls) < len(urls):
+             logger.debug(f"URLs filtered out by keywords: {set(urls) - set(selected_urls)}")
+        return selected_urls

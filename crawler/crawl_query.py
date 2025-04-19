@@ -11,7 +11,7 @@ from crawler.store import builder # Import builder to get store length
 from crawler.llm_processing import query_expansion
 from crawler.logger import setup_logger
 from config import config # Use config for defaults
-from crawler.utils import format_keywords_for_store_query, extract_keywords, format_keywords_for_search
+from crawler.utils import strip_and_join_with_spaces, extract_keywords, format_keywords_for_search
 
 logger = setup_logger()
 
@@ -50,8 +50,14 @@ def perform_crawl_and_query(
     original_prompt = prompt
     query_expanded_list = query_expansion(prompt)
     search_prompt = format_keywords_for_search(query_expanded_list)
-    query_prompt = format_keywords_for_store_query(query_expanded_list)
-    prompt_keywords = extract_keywords(query_prompt)
+    prompt_keywords = extract_keywords(query_expanded_list)
+    query_prompt = strip_and_join_with_spaces(prompt_keywords)
+
+    logger.info(f"Original prompt: {original_prompt}")
+    logger.info(f"Query Expanded List: {query_expanded_list}")
+    logger.info(f"Search Prompt: {search_prompt}")
+    logger.info(f"Query Prompt: {query_prompt}")
+    logger.info(f"Prompt Keywords: {prompt_keywords}")
     
 
     # Use provided parameters or fall back to config defaults
@@ -72,8 +78,9 @@ def perform_crawl_and_query(
         if not force_crawl:
             logger.info("Checking existing store (cache) for relevant results...")
             initial_results = crawler.query(query_prompt, n=num_results_final)
-            # Check if enough results meet the base relevance threshold
-            if initial_results and len(initial_results) >= num_results_final and all(r['score'] >= base_relevance_threshold_final for r in initial_results):
+            # Check if enough results meet the base relevance threshold (comparing with cosine_similarity_score and not weighted_score as that might 
+            # be representing high weighted_score due to high heuristic_score match even for unrelated content)
+            if initial_results and len(initial_results) >= num_results_final and all(r['cosine_similarity_score'] >= base_relevance_threshold_final for r in initial_results):
                 logger.info(f"Found {len(initial_results)} sufficient results in cache meeting threshold {base_relevance_threshold_final:.2f}. Skipping crawl.")
                 results = initial_results
                 from_cache = True

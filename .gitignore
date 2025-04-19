@@ -189,9 +189,9 @@ cython_debug/
 # Misc
 logs/
 models/
-crawler/states/
+crawler_state/
+crawler_state_good/
 old/
-
 
 # Vite
 # Logs

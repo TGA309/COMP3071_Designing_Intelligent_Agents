@@ -44,7 +44,7 @@ async def crawl_endpoint(request: CrawlRequest):
         num_seed_urls=request.num_seed_urls,
         force_crawl=request.force_crawl_flag,
         relevance_threshold=request.relevance_threshold,
-        use_llm=request.use_llm_flag
+        use_llm_response=request.use_llm_flag
     )
 
     return crawl_response

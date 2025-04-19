@@ -21,19 +21,19 @@ class StoreConfig:
     CONTENT_STORE_DIR = STATE_DIR / "content_store"
     CONTENT_STORE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Removed vector store config and weights
+    # Heuristic Score Weightage
+    heuristic_score_weight = 0.6
+
+    # Cosine Similarity Score Weightage
+    cosine_similarity_score_weight = 0.4
 
 class CrawlerConfig:
     # How often (in terms of depth levels) to save crawler state
     save_frequency = 3 # Save more frequently perhaps
 
-    # Relevance threshold below which a crawled page's content won't be stored
-    # This is based on the heuristic score calculated by ContentHeuristics
-    url_relevance_threshold = 0.25 # Lowered slightly, TF-IDF will do final ranking
-
     # Relevance threshold used during crawling to decide if results are good enough to stop
-    # This applies to the TF-IDF scores from the query() method
-    minimum_relevance_threshold = 0.15 # Minimum TF-IDF score considered relevant
+    # This applies to the weighted scores from the query() method
+    minimum_relevance_threshold = 0.15 # Minimum score considered relevant
 
     # The amount by which the target relevance threshold decreases per crawl depth
     depth_relevance_step = 0.05
@@ -58,7 +58,7 @@ class CrawlAPI:
     force_crawl = False
 
     # Default relevance threshold to start crawl with (for depth 0)
-    relevance_threshold = 0.3
+    relevance_threshold = 0.4
 
 class APIConfig:
     # Encapsulates API-level defaults for the crawl operation

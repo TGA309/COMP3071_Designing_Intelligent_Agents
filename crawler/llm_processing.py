@@ -13,7 +13,7 @@ if not api_key:
 # Initialize Mistral AI client
 client = Mistral(api_key=api_key)
 
-def query_expansion(query_text, n_keywords=10):
+def query_expansion(query_text, n_keywords=6):
     """
     Expands a user query into a comma-separated list of search keywords and phrases.
     

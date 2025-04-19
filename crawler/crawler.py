@@ -1,8 +1,9 @@
-# crawler.py (Updated)
+# crawler.py (Updated with URLHeuristics)
 """
 Core Adaptive Web Crawler implementation.
 Manages the crawling process, fetching, extraction, scoring, and interaction
 with the store module. Uses parallel processing for efficiency.
+Includes URL-based filtering before adding to the queue.
 """
 import concurrent.futures
 import time
@@ -14,7 +15,8 @@ from crawler.logger import setup_logger
 from crawler.utils import extract_keywords, is_valid_url
 from crawler.search import perform_search
 from crawler import extractor # Use the refactored extractor
-from crawler.heuristics import ContentHeuristics
+# Import BOTH heuristic classes now
+from crawler.heuristics import ContentHeuristics, URLHeuristics
 from crawler.store import builder, persistence, scorer # Use the new store modules
 
 class AdaptiveWebCrawler:
@@ -22,11 +24,13 @@ class AdaptiveWebCrawler:
     def __init__(self):
         """Initializes the crawler."""
         self.logger = setup_logger()
-        self.heuristics = ContentHeuristics()
+        # Keep ContentHeuristics for page content scoring
+        self.content_heuristics = ContentHeuristics()
+        # URLHeuristics will be instantiated per crawl based on prompt_keywords
 
         # State managed externally, loaded/saved via persistence
         self.visited_urls: Set[str] = set()
-        # self.content_hashes are managed within heuristics instance
+        # self.content_hashes are managed within content_heuristics instance
 
         # Configuration shortcuts (used if not overridden by crawl method)
         self.default_max_depth = config.api.crawl.max_depth
@@ -50,30 +54,36 @@ class AdaptiveWebCrawler:
         # It also calls builder.initialize_store internally
         loaded_visited, loaded_hashes = persistence.load_state()
         self.visited_urls = loaded_visited
-        self.heuristics.load_hashes(loaded_hashes) # Load hashes into heuristics instance
+        # Load hashes into the content_heuristics instance
+        self.content_heuristics.load_hashes(loaded_hashes)
         self.logger.info(f"Loaded state: {len(self.visited_urls)} visited URLs, "
-                         f"{len(self.heuristics.content_hashes)} content hashes, "
+                         f"{len(self.content_heuristics.content_hashes)} content hashes, "
                          f"{len(builder.get_content_store())} items in content store.")
 
     def _save_crawler_state(self):
         """Saves the current crawler state."""
         self.logger.info("Saving crawler state...")
-        persistence.save_state(self.visited_urls, self.heuristics.content_hashes)
+        # Save hashes from the content_heuristics instance
+        persistence.save_state(self.visited_urls, self.content_heuristics.content_hashes)
         self.logger.info("Crawler state saved.")
 
     # Added parameters back to crawl method signature
-    def crawl(self, original_prompt: str, search_prompt: str, query_prompt: str, prompt_keywords:List[str], 
-               urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None, 
+    def crawl(self, original_prompt: str, search_prompt: str, query_prompt: str, prompt_keywords:List[str],
+               urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None,
                max_depth: Optional[int] = None, base_relevance_threshold: Optional[float] = None):
         """
         Starts the crawl process with stricter batch-by-batch processing per depth.
+        Uses URLHeuristics to filter URLs before adding them to the crawl queue.
 
         Args:
-            prompt: User query/prompt.
+            original_prompt: The original user query.
+            search_prompt: The prompt formatted for search engines.
+            query_prompt: The prompt formatted for the internal store query.
+            prompt_keywords: Keywords extracted from the expanded query.
             urls: Optional list of initial URLs to crawl.
-            num_seed_urls: Number of URLs to fetch from search if `urls` is not provided. Uses default if None.
-            max_depth: Override the maximum crawl depth. Uses default if None.
-            base_relevance_threshold: Starting relevance threshold for depth 0. Uses default if None.
+            num_seed_urls: Number of URLs to fetch from search if `urls` is not provided.
+            max_depth: Maximum crawl depth.
+            base_relevance_threshold: Starting content relevance threshold for depth 0.
         """
         # Use provided parameters or fall back to defaults stored in self
         current_num_seed_urls = num_seed_urls if num_seed_urls is not None else self.default_num_seed_urls
@@ -84,39 +94,53 @@ class AdaptiveWebCrawler:
         self.logger.info(f"Crawl Params: num_seed={current_num_seed_urls}, max_depth={current_max_depth}, base_relevance={current_base_relevance_threshold}")
         self.logger.info(f"Using keywords for scoring: {prompt_keywords}")
 
+        # --- Instantiate URLHeuristics for this crawl ---
+        url_heuristics = URLHeuristics(prompt_keywords)
+
         # --- Determine Seed URLs ---
+        raw_seed_urls: List[str] = []
         if urls:
-            seed_urls = list(set(filter(is_valid_url, urls))) # Filter invalid URLs
+            valid_provided_urls = list(set(filter(is_valid_url, urls))) # Filter invalid URLs
             # Combine provided URLs with search results
+            self.logger.info(f"Fetching {current_num_seed_urls} additional URLs from search...")
             search_results = perform_search(search_prompt, current_num_seed_urls)
-            seed_urls = list(set(seed_urls) | set(search_results)) # Use set union for unique URLs
-            self.logger.info(f"Using provided valid seed URLs combined with search results: {len(seed_urls)}")
+            raw_seed_urls = list(set(valid_provided_urls) | set(search_results)) # Use set union for unique URLs
+            self.logger.info(f"Combined provided valid URLs with search results: {len(raw_seed_urls)}")
         else:
             self.logger.info(f"No URLs provided, performing search for {current_num_seed_urls} seed URLs...")
-            seed_urls = perform_search(search_prompt, current_num_seed_urls)
-            self.logger.info(f"Obtained seed URLs from search: {len(seed_urls)}")
+            raw_seed_urls = perform_search(search_prompt, current_num_seed_urls)
+            self.logger.info(f"Obtained seed URLs from search: {len(raw_seed_urls)}")
 
-        if not seed_urls:
+        if not raw_seed_urls:
             self.logger.warning("No valid seed URLs found. Stopping crawl.")
+            return
+
+        # --- Filter Seed URLs using URLHeuristics ---
+        filtered_seed_urls = url_heuristics.select_best_urls(raw_seed_urls)
+        self.logger.info(f"Selected {len(filtered_seed_urls)} seed URLs after URL keyword filtering.")
+
+        if not filtered_seed_urls:
+            self.logger.warning("No seed URLs passed URL keyword filtering. Stopping crawl.")
             return
 
         # --- Crawling Loop ---
         current_depth = 0
-        urls_to_crawl_this_depth = [url for url in seed_urls if url not in self.visited_urls]
+        # Start with the filtered seed URLs, excluding already visited ones
+        urls_to_crawl_this_depth = [url for url in filtered_seed_urls if url not in self.visited_urls]
         all_discovered_urls = set(urls_to_crawl_this_depth) | self.visited_urls # Track all URLs encountered
 
         while current_depth <= current_max_depth and urls_to_crawl_this_depth:
             self.logger.info(f"\n--- Starting Crawl Depth {current_depth} ---")
-            self.logger.info(f"URLs to process at this depth: {len(urls_to_crawl_this_depth)}")
+            self.logger.info(f"URLs to process at this depth (after filtering): {len(urls_to_crawl_this_depth)}")
 
-            # Calculate relevance threshold for this depth
+            # Calculate content relevance threshold for this depth
             current_depth_relevance_threshold = max(
                 self.min_crawl_relevance,
                 current_base_relevance_threshold - (current_depth * self.depth_relevance_step)
             )
-            self.logger.info(f"Relevance threshold for depth {current_depth}: {current_depth_relevance_threshold:.2f}")
+            self.logger.info(f"Content Relevance threshold for depth {current_depth}: {current_depth_relevance_threshold:.2f}")
 
-            next_depth_urls_discovered: Set[str] = set()
+            discovered_links_this_depth: Set[str] = set() # Collect all links found at this depth *before* filtering
             processed_count_total_this_depth = 0
             stop_early = False # Flag to break outer loop if stopping early
 
@@ -132,7 +156,8 @@ class AdaptiveWebCrawler:
                     # Submit only the URLs for the current batch
                     for url in batch_urls:
                         if url not in self.visited_urls: # Double check before submitting
-                            future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth_relevance_threshold)
+                            # Pass content_heuristics instance, not the class itself
+                            future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth_relevance_threshold, self.content_heuristics)
                             batch_futures[future] = url
 
                     # Process completed futures for THIS BATCH ONLY
@@ -145,15 +170,16 @@ class AdaptiveWebCrawler:
                             self.visited_urls.add(url) # Mark as visited *after* successful processing
 
                             if result_links is not None:
-                                # Add newly discovered, valid, unvisited links for the next depth
-                                new_links_count = 0
+                                # Add newly discovered, valid links to the set for this depth
+                                new_raw_links_count = 0
                                 for link in result_links:
-                                    if is_valid_url(link) and link not in all_discovered_urls:
-                                        next_depth_urls_discovered.add(link)
-                                        all_discovered_urls.add(link) # Add to global discovered set
-                                        new_links_count += 1
-                                if new_links_count > 0:
-                                    self.logger.debug(f"Discovered {new_links_count} new URLs from {url}")
+                                     # Check validity only here, not visited or keyword status yet
+                                    if is_valid_url(link):
+                                        discovered_links_this_depth.add(link)
+                                        new_raw_links_count += 1
+                                if new_raw_links_count > 0:
+                                    self.logger.debug(f"Discovered {new_raw_links_count} raw valid links from {url}")
+
 
                         except Exception as exc:
                             self.logger.error(f"URL {url} generated an exception during processing: {exc}", exc_info=False)
@@ -163,13 +189,15 @@ class AdaptiveWebCrawler:
 
                 # --- Check for early stopping AFTER each batch is fully processed ---
                 self.logger.debug(f"Checking early stop condition after batch {i // self.batch_size + 1}.")
+                # Query needs the crawler instance's content store knowledge
                 query_results = self.query(query_prompt, n=self.default_num_results)
 
                 if query_results:
-                    scores = [r['score'] for r in query_results]
+                    scores = [r['weighted_score'] for r in query_results]
                     self.logger.debug(f"Checking scores for early stop: {scores} against threshold {current_depth_relevance_threshold:.2f}")
-                    if len(query_results) >= self.default_num_results and all(r['score'] >= current_depth_relevance_threshold for r in query_results):
-                        self.logger.info(f"Found {len(query_results)} relevant results meeting threshold {current_depth_relevance_threshold:.2f}. Stopping crawl early.")
+                    # Use content relevance threshold for early stopping based on query results
+                    if len(query_results) >= self.default_num_results and all(r['weighted_score'] >= current_depth_relevance_threshold for r in query_results):
+                        self.logger.info(f"Found {len(query_results)} relevant results meeting content threshold score: {current_depth_relevance_threshold:.2f}. Stopping crawl early.")
                         stop_early = True
                         break # Exit the batch loop for this depth
                 else:
@@ -183,14 +211,32 @@ class AdaptiveWebCrawler:
             # --- Prepare for Next Depth ---
             self.logger.info(f"--- Depth {current_depth} Complete ---")
             self.logger.info(f"Processed {processed_count_total_this_depth} URLs in total for this depth.")
-            self.logger.info(f"Discovered {len(next_depth_urls_discovered)} new unique URLs for next depth.")
+            self.logger.info(f"Discovered {len(discovered_links_this_depth)} raw unique valid URLs during this depth.")
+
+            # --- Filter Discovered URLs for Next Depth using URLHeuristics ---
+            # Filter only links that haven't been seen/queued before
+            newly_discovered_links = [link for link in discovered_links_this_depth if link not in all_discovered_urls]
+            self.logger.info(f"Found {len(newly_discovered_links)} potentially new unique URLs.")
+
+            if newly_discovered_links:
+                # Apply URL keyword filtering
+                next_depth_urls_filtered = url_heuristics.select_best_urls(newly_discovered_links)
+                self.logger.info(f"Selected {len(next_depth_urls_filtered)} URLs for next depth after URL keyword filtering.")
+
+                # Update the set of all discovered URLs and prepare the list for the next loop iteration
+                urls_to_crawl_this_depth = []
+                for url in next_depth_urls_filtered:
+                    if url not in all_discovered_urls: # Final check
+                         urls_to_crawl_this_depth.append(url)
+                         all_discovered_urls.add(url) # Add selected URLs to the global set
+            else:
+                 urls_to_crawl_this_depth = [] # No new links found or selected
+
             self.logger.info(f"Total content items in store: {len(builder.get_content_store())}")
 
-            # Set up URLs for the next iteration
-            urls_to_crawl_this_depth = list(next_depth_urls_discovered)
             current_depth += 1
 
-            # Periodic save state (consider saving after each depth or less frequently)
+            # Periodic save state
             if current_depth % config.crawler.save_frequency == 0:
                  self._save_crawler_state()
 
@@ -198,14 +244,16 @@ class AdaptiveWebCrawler:
         self.logger.info(f"Crawling finished (max depth {current_max_depth} reached, stopped early, or no more URLs).")
         self._save_crawler_state() # Final save
 
-    def _process_single_url(self, url: str, prompt_keywords: List[str], relevance_threshold: float) -> Optional[List[str]]:
+    def _process_single_url(self, url: str, prompt_keywords: List[str], content_relevance_threshold: float, content_scorer: ContentHeuristics) -> Optional[List[str]]:
         """
-        Fetches, extracts, scores, and stores content for a single URL.
+        Fetches, extracts, scores content, and stores content for a single URL.
+        Uses the provided ContentHeuristics instance for scoring and duplicate checks.
 
         Args:
             url: The URL to process.
             prompt_keywords: Keywords for scoring relevance.
-            relevance_threshold: The minimum heuristic score needed for this depth.
+            content_relevance_threshold: The minimum content heuristic score needed.
+            content_scorer: The ContentHeuristics instance to use.
 
         Returns:
             A list of discovered valid links from the page, or None if processing fails
@@ -234,32 +282,31 @@ class AdaptiveWebCrawler:
             self.logger.debug(f"Extraction failed or no significant content for {url}")
             return None # Extraction failed or content too sparse
 
-        # 3. Score Page Relevance (Heuristic Score - applied to readability output)
-        page_score = self.heuristics.calculate_page_score(extracted_data, prompt_keywords)
+        # 3. Score Page Content Relevance (using the passed ContentHeuristics instance)
+        page_score = content_scorer.calculate_page_score(extracted_data, prompt_keywords)
         extracted_data['heuristic_score'] = page_score # Add score to data
-        self.logger.info(f"Heuristic score for {url}: {page_score:.3f}")
+        self.logger.info(f"Content heuristic score for {url}: {page_score:.3f}")
 
-        # 4. Check if content should be processed (Duplicate Check & Basic Quality)
+        # 4. Check if content should be processed (Duplicate Check & Basic Quality - using the passed instance)
         # Pass the cleaned main content text for hashing
-        should_process = self.heuristics.should_process_content(extracted_data['main_content'], url)
+        should_process = content_scorer.should_process_content(extracted_data['main_content'], url)
 
-        if page_score >= relevance_threshold and should_process:
+        if page_score >= content_relevance_threshold and should_process:
             # 5. Add to Content Store (via builder)
             builder.add_content(extracted_data)
             self.logger.debug(f"Added content from {url} to store.")
             # Return the links discovered on this relevant page
             return extracted_data.get('links', [])
         else:
-            if page_score < relevance_threshold:
-                 self.logger.info(f"Skipping store for {url}: Score {page_score:.3f} below threshold {relevance_threshold:.2f}")
+            if page_score < content_relevance_threshold:
+                 self.logger.info(f"Skipping store for {url}: Content score {page_score:.3f} below threshold {content_relevance_threshold:.2f}")
             if not should_process:
                  # Reason logged within should_process_content (duplicate or empty)
                  pass
             # Even if not stored, return links if the page was reachable (helps exploration)
-            # Modify this if you only want links from *stored* pages
+            # Crucial: Return links even if content score is low, so URL heuristics can filter them later
             return extracted_data.get('links', [])
 
-    # Added parameter n back to query method
     def query(self, prompt: str, n: Optional[int] = None) -> List[Dict]:
         """
         Queries the crawled content store using TF-IDF similarity.
@@ -281,28 +328,27 @@ class AdaptiveWebCrawler:
             self.logger.warning("Query attempted on empty content store.")
             return []
 
-        # Use the TF-IDF scorer
-        results = scorer.tfidf_similarity_search(query=prompt, k=num_results_to_get)
+        # Use the weighted scorer
+        results = scorer.calculate_score(query=prompt, k=num_results_to_get, weight_heuristic=config.store.heuristic_score_weight, weight_cosine=config.store.cosine_similarity_score_weight)
 
-        # Format results (scorer already adds 'score')
-        # Ensure required keys are present, add defaults if missing
+        # Format results
         formatted_results = []
         for res in results:
-             formatted = {
-                 'content': res.get('main_content', ''), # Already fixed to main_content
-                 'source': res.get('url', 'N/A'),
-                 'title': res.get('title', 'N/A'),
-                 'domain': res.get('domain', 'N/A'),
-                 'score': res.get('score', 0.0), # TF-IDF score
-                 'publish_date': res.get('publish_date'), # Already datetime or None
-                 'content_length': res.get('content_length', 0),
-                 'heuristic_score': res.get('heuristic_score', 0.0) # Include heuristic score if available
-             }
-             formatted_results.append(formatted)
+            formatted = {
+                'content': res.get('main_content', ''),
+                'source': res.get('url', 'N/A'),
+                'title': res.get('title', 'N/A'),
+                'domain': res.get('domain', 'N/A'),
+                'heuristic_score': res.get('heuristic_score', 0.0),
+                'cosine_similarity_score': res.get('cosine_similarity_score', 0.0),
+                'weighted_score': res.get('weighted_score', 0.0),
+                'publish_date': res.get('publish_date', 'N/A'),
+                'content_length': res.get('content_length', 0)
+                }
+            formatted_results.append(formatted)
 
         self.logger.info(f"Query returned {len(formatted_results)} results.")
-        # Log top result score for debugging
         if formatted_results:
-             self.logger.debug(f"Top result score (TF-IDF): {formatted_results[0]['score']:.4f}")
+            self.logger.debug(f"Top result score: \n(Heuristic): {formatted_results[0]['heuristic_score']:.4f}\n(Cosine): {formatted_results[0]['cosine_similarity_score']:.4f}\n(Weighted): {formatted_results[0]['weighted_score']:.4f}")
 
         return formatted_results

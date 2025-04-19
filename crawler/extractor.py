@@ -18,11 +18,8 @@ from .utils import clean_text # Use clean_text from utils
 logger = setup_logger()
 
 # --- Constants for Extraction ---
-# Tags often containing code blocks (still useful after readability)
+# Tags often containing code blocks
 CODE_SELECTORS = ['pre', 'code', '.highlight', '.syntax', '.example-code', '[class*="language-"]']
-# Tags to remove completely before readability processing (optional, readability handles most)
-# STRIP_TAGS = ['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'noscript', 'iframe']
-# AD_SELECTORS = ['.ad', '.ads', '.advert', '.banner', '.sponsor', '[class*="advert"]', '[id*="ad"]']
 
 
 def fetch_page(url: str, timeout: int = 10) -> Optional[Tuple[str, str]]:
