@@ -8,7 +8,8 @@ from typing import List, Dict, Optional
 
 from crawler.crawler import AdaptiveWebCrawler
 from crawler.store import builder # Import builder to get store length
-from crawler.llm_processing import query_expansion
+from crawler.llm_processing import evaluate_responses, query_expansion,  generate_llm_response
+from crawler.evaluation_metrics import EvaluationMetrics  # Import EvaluationMetrics
 from crawler.logger import setup_logger
 from config import config # Use config for defaults
 from crawler.utils import strip_and_join_with_spaces, extract_keywords, format_keywords_for_search
@@ -46,6 +47,12 @@ def perform_crawl_and_query(
     if urls: logger.info(f"Provided URLs: {urls}")
     if force_crawl: logger.info("`force_crawl` flag is set, will crawl regardless of cache.")
 
+    # Initialize evaluation metrics
+    evaluation_metrics = EvaluationMetrics()
+    
+    # Start timing measurement
+    evaluation_metrics.start_timer()
+
     # Do query expansion on prompt
     original_prompt = prompt
     query_expanded_list = query_expansion(prompt)
@@ -78,11 +85,18 @@ def perform_crawl_and_query(
         if not force_crawl:
             logger.info("Checking existing store (cache) for relevant results...")
             initial_results = crawler.query(query_prompt, n=num_results_final)
-            # Check if enough results meet the base relevance threshold (comparing with cosine_similarity_score and not weighted_score as that might 
-            # be representing high weighted_score due to high heuristic_score match even for unrelated content)
-            if initial_results and len(initial_results) >= num_results_final and all(r['cosine_similarity_score'] >= base_relevance_threshold_final for r in initial_results):
+            # Check if enough results meet the base relevance threshold
+            if initial_results and len(initial_results) >= num_results_final and all(r['weighted_score'] >= base_relevance_threshold_final for r in initial_results):
                 logger.info(f"Found {len(initial_results)} sufficient results in cache meeting threshold {base_relevance_threshold_final:.2f}. Skipping crawl.")
                 results = initial_results
+                
+                # Record cache access in harvest ratio metric
+                crawler.harvest_ratio_metric.record_cache_access(
+                    results=initial_results,
+                    base_relevance_threshold=base_relevance_threshold_final
+                )
+                
+                # Set from_cache flag to True
                 from_cache = True
             else:
                  logger.info("Existing store does not contain sufficient results or threshold not met. Proceeding with crawl.")
@@ -107,17 +121,20 @@ def perform_crawl_and_query(
             results = crawler.query(query_prompt, n=num_results_final)
             logger.info("Crawl process finished.")
 
+        # Stop the timer before generating LLM Response and Evaluation
+        evaluation_metrics.stop_timer()
+
         # --- Generate LLM Response (Optional) ---
         llm_response = None
-        # if use_llm_response and results:
-        #     try:
-        #         logger.info("Generating LLM response...")
-        #         # Assuming generate_llm_response exists and takes results + prompt
-        #         # llm_response = generate_llm_response(results, prompt)
-        #         logger.info("LLM response generated.")
-        #     except Exception as llm_err:
-        #         logger.error(f"Failed to generate LLM response: {llm_err}", exc_info=True)
-        #         llm_response = f"Error generating LLM response: {llm_err}" # Include error in response
+        
+        if use_llm_response and results:
+            try:
+                logger.info("Generating LLM response...")
+                llm_response = generate_llm_response(original_prompt, results)
+                logger.info("LLM response generated.")
+            except Exception as llm_err:
+                logger.error(f"Failed to generate LLM response: {llm_err}", exc_info=True)
+                llm_response = f"Error generating LLM response: {llm_err}"  # Include error in response
 
 
         # --- Prepare Metadata ---
@@ -134,22 +151,34 @@ def perform_crawl_and_query(
             "content_collected_total": final_content_count,
             "from_cache": from_cache # Include the cache flag
         }
-
+        
+        # Get comprehensive evaluation metrics
+        evaluation_results = evaluation_metrics.evaluate(
+            original_prompt=original_prompt,
+            crawled_results=results,
+            llm_response=llm_response if use_llm_response and llm_response else None,
+            harvest_ratio_metrics=crawler.harvest_ratio_metric.get_metrics()
+        )
+        
         # --- Build Final Response ---
         response = {
             "status": "success",
             "results": results,
-            "metadata": metadata
+            "metadata": metadata,
+            "llm_response": llm_response if (use_llm_response and llm_response) else "N/A",
+            "evaluation_metrics": evaluation_results,
         }
-
-        if llm_response:
-            response["llm_response"] = llm_response
-
+        
         logger.info(f"Request completed successfully. Returning {len(results)} results. (Served from cache: {from_cache})")
         return response
-
+        
     except Exception as e:
+        # Stop timer even in case of error
+        if 'evaluation_metrics' in locals():
+            evaluation_metrics.stop_timer()
+            
         logger.error(f"Critical error in perform_crawl_and_query: {e}", exc_info=True)
+        
         # Attempt to get some metadata even in case of error
         try:
             visited_count = len(crawler.visited_urls) if crawler else 0
@@ -157,14 +186,14 @@ def perform_crawl_and_query(
         except:
             visited_count = 0
             content_count = 0
-
+        
         return {
             "status": "error",
             "error": f"An unexpected error occurred: {str(e)}",
             "results": [],
             "metadata": {
-                 "urls": {"visited_total": visited_count},
-                 "content_collected_total": content_count,
-                 "from_cache": False # Assume not from cache if error occurred
+                "urls": {"visited_total": visited_count},
+                "content_collected_total": content_count,
+                "from_cache": False  # Assume not from cache if error occurred
             }
         }

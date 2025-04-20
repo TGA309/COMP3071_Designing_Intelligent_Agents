@@ -7,7 +7,7 @@ class LoggerConfig:
     LOG_DIR = Path("logs")
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     # Logging level (e.g., 'INFO', 'DEBUG')
-    LOG_LEVEL = 'DEBUG'
+    LOG_LEVEL = 'INFO'
 
 # Removed ModelConfig as embeddings are no longer used directly by the crawler
 

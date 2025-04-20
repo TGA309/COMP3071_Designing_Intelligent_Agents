@@ -6,27 +6,26 @@ with the store module. Uses parallel processing for efficiency.
 Includes URL-based filtering before adding to the queue.
 """
 import concurrent.futures
-import time
-from typing import List, Dict, Optional, Set, Tuple
+from typing import List, Dict, Optional, Set
 
 # Import project components
 from config import config
 from crawler.logger import setup_logger
-from crawler.utils import extract_keywords, is_valid_url
+from crawler.utils import is_valid_url
 from crawler.search import perform_search
 from crawler import extractor # Use the refactored extractor
-# Import BOTH heuristic classes now
 from crawler.heuristics import ContentHeuristics, URLHeuristics
+from crawler.evaluation_metrics import HarvestRatio
 from crawler.store import builder, persistence, scorer # Use the new store modules
 
 class AdaptiveWebCrawler:
-    # Removed parameters from __init__ as they are request-specific
     def __init__(self):
         """Initializes the crawler."""
         self.logger = setup_logger()
         # Keep ContentHeuristics for page content scoring
         self.content_heuristics = ContentHeuristics()
-        # URLHeuristics will be instantiated per crawl based on prompt_keywords
+        # Initialize harvest ratio metric
+        self.harvest_ratio_metric = HarvestRatio()
 
         # State managed externally, loaded/saved via persistence
         self.visited_urls: Set[str] = set()
@@ -157,7 +156,7 @@ class AdaptiveWebCrawler:
                     for url in batch_urls:
                         if url not in self.visited_urls: # Double check before submitting
                             # Pass content_heuristics instance, not the class itself
-                            future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth_relevance_threshold, self.content_heuristics)
+                            future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth, current_depth_relevance_threshold, self.content_heuristics)
                             batch_futures[future] = url
 
                     # Process completed futures for THIS BATCH ONLY
@@ -234,6 +233,10 @@ class AdaptiveWebCrawler:
 
             self.logger.info(f"Total content items in store: {len(builder.get_content_store())}")
 
+            # At the end of each depth, log the harvest ratio for this depth
+            depth_hr = self.harvest_ratio_metric.get_depth_harvest_ratio(current_depth)
+            self.logger.info(f"Harvest ratio at depth {current_depth}: {depth_hr:.4f}")
+
             current_depth += 1
 
             # Periodic save state
@@ -242,9 +245,15 @@ class AdaptiveWebCrawler:
 
         # --- Finalization ---
         self.logger.info(f"Crawling finished (max depth {current_max_depth} reached, stopped early, or no more URLs).")
-        self._save_crawler_state() # Final save
 
-    def _process_single_url(self, url: str, prompt_keywords: List[str], content_relevance_threshold: float, content_scorer: ContentHeuristics) -> Optional[List[str]]:
+        # At the end of crawl, log the cumulative harvest ratio
+        cumulative_hr = self.harvest_ratio_metric.get_cumulative_harvest_ratio()
+        self.logger.info(f"Cumulative harvest ratio: {cumulative_hr:.4f}")
+
+        # Final save
+        self._save_crawler_state() 
+
+    def _process_single_url(self, url: str, prompt_keywords: List[str], current_depth: int, content_relevance_threshold: float, content_scorer: ContentHeuristics) -> Optional[List[str]]:
         """
         Fetches, extracts, scores content, and stores content for a single URL.
         Uses the provided ContentHeuristics instance for scoring and duplicate checks.
@@ -286,6 +295,14 @@ class AdaptiveWebCrawler:
         page_score = content_scorer.calculate_page_score(extracted_data, prompt_keywords)
         extracted_data['heuristic_score'] = page_score # Add score to data
         self.logger.info(f"Content heuristic score for {url}: {page_score:.3f}")
+
+        # Record this page in harvest ratio metrics
+        self.harvest_ratio_metric.record_page(
+            depth=current_depth,  # You need to pass this from the crawl method
+            page_score=page_score,
+            depth_threshold=content_relevance_threshold,
+            is_processed=True
+        )
 
         # 4. Check if content should be processed (Duplicate Check & Basic Quality - using the passed instance)
         # Pass the cleaned main content text for hashing

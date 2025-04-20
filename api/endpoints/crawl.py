@@ -18,7 +18,7 @@ class CrawlRequest(BaseModel):
     num_seed_urls: int = Field(config.api.crawl.num_seed_urls, description="Number of seed URLs to use for crawling")
     force_crawl_flag: bool = Field(config.api.crawl.force_crawl, description="Force new crawl instead of using cached results")
     relevance_threshold: float = Field(config.api.crawl.relevance_threshold, description="Minimum relevance score for results to be considered")
-    use_llm_flag: bool = Field(False, description="Whether to generate an LLM response based on the results")
+    use_llm_response: bool = Field(False, description="Whether to generate an LLM response based on the results")
 
 @router.post("/", summary="Start a crawl operation", response_model=dict)
 async def crawl_endpoint(request: CrawlRequest):
@@ -32,7 +32,7 @@ async def crawl_endpoint(request: CrawlRequest):
     - **num_seed_urls**: Number of seed URLs to use for crawling
     - **force_crawl_flag**: Optional flag to force new crawl instead of using cached results
     - **relevance_threshold**: Minimum relevance score for results to be considered
-    - **use_llm_flag**: Whether to generate an LLM response based on the results
+    - **use_llm_response**: Whether to generate an LLM response based on the results
     """
 
     # Perform crawl and query
@@ -44,7 +44,7 @@ async def crawl_endpoint(request: CrawlRequest):
         num_seed_urls=request.num_seed_urls,
         force_crawl=request.force_crawl_flag,
         relevance_threshold=request.relevance_threshold,
-        use_llm_response=request.use_llm_flag
+        use_llm_response=request.use_llm_response
     )
 
     return crawl_response
