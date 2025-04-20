@@ -16,7 +16,7 @@ class CrawlRequest(BaseModel):
     num_results: int = Field(config.api.crawl.num_results, description="Number of results to return from the query")
     max_depth: int = Field(config.api.crawl.max_depth, description="Maximum depth for the crawl operation")
     num_seed_urls: int = Field(config.api.crawl.num_seed_urls, description="Number of seed URLs to use for crawling")
-    force_crawl_flag: bool = Field(config.api.crawl.force_crawl, description="Force new crawl instead of using cached results")
+    force_crawl: bool = Field(config.api.crawl.force_crawl, description="Force new crawl instead of using cached results")
     relevance_threshold: float = Field(config.api.crawl.relevance_threshold, description="Minimum relevance score for results to be considered")
     use_llm_response: bool = Field(False, description="Whether to generate an LLM response based on the results")
 
@@ -30,7 +30,7 @@ async def crawl_endpoint(request: CrawlRequest):
     - **num_results**: Number of results to return from the query
     - **max_depth**: Maximum depth for the crawl operation
     - **num_seed_urls**: Number of seed URLs to use for crawling
-    - **force_crawl_flag**: Optional flag to force new crawl instead of using cached results
+    - **force_crawl**: Optional flag to force new crawl instead of using cached results
     - **relevance_threshold**: Minimum relevance score for results to be considered
     - **use_llm_response**: Whether to generate an LLM response based on the results
     """
@@ -42,7 +42,7 @@ async def crawl_endpoint(request: CrawlRequest):
         n=request.num_results,
         max_depth=request.max_depth,
         num_seed_urls=request.num_seed_urls,
-        force_crawl=request.force_crawl_flag,
+        force_crawl=request.force_crawl,
         relevance_threshold=request.relevance_threshold,
         use_llm_response=request.use_llm_response
     )

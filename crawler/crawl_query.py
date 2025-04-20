@@ -163,6 +163,7 @@ def perform_crawl_and_query(
         # --- Build Final Response ---
         response = {
             "status": "success",
+            "prompt": original_prompt,
             "results": results,
             "metadata": metadata,
             "llm_response": llm_response if (use_llm_response and llm_response) else "N/A",
@@ -189,6 +190,7 @@ def perform_crawl_and_query(
         
         return {
             "status": "error",
+            "prompt": original_prompt,
             "error": f"An unexpected error occurred: {str(e)}",
             "results": [],
             "metadata": {

@@ -1,17 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './WebCrawler.css';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { BiRefresh } from "react-icons/bi"; // Import refresh icon
 
 const WebCrawler = () => {
+
+  const apiUrl = import.meta.env.VITE_API_ENDPOINT;
+  const apiPORT = import.meta.env.VITE_API_PORT;
   const [prompt, setPrompt] = useState('');
   const [enableUrl, setEnableUrl] = useState(false);
-  const [strictUrl, setStrictUrl] = useState(false);
   const [showUrlPopup, setShowUrlPopup] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [urls, setUrls] = useState([]);
   const chatAreaRef = useRef(null);
   const promptInputRef = useRef(null);
-  
   // State for managing multiple chats
   const [chats, setChats] = useState([
     { id: 1, title: 'New Chat', messages: [] }
@@ -19,7 +25,19 @@ const WebCrawler = () => {
   const [activeChat, setActiveChat] = useState(1);
   const [renamingChatId, setRenamingChatId] = useState(null);
   const [newChatTitle, setNewChatTitle] = useState('');
+  const [_, setApiResponse] = useState(null);
+  // State to track active tabs for each message
+  const [messageTabStates, setMessageTabStates] = useState({});
+  const [isLoading, setIsLoading] = useState(false);
 
+  // Function to update tab state for a specific message
+  const handleTabChange = (messageId, tabName) => {
+    setMessageTabStates(prevState => ({
+      ...prevState,
+      [messageId]: tabName
+    }));
+  };
+  
   // Functions for managing chats
   const createNewChat = () => {
     // If no chats exist, create the first chat titled "New Chat"
@@ -133,20 +151,20 @@ const WebCrawler = () => {
     }
   };
 
-  const handleEnableUrlToggle = () => {
+  const handleEnableUrlToggle = (e) => {
+    // Prevent event propagation and default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
     const newEnableUrlState = !enableUrl;
     setEnableUrl(newEnableUrlState);
     if (!newEnableUrlState) {
-      setStrictUrl(false);
       setShowUrlPopup(false);
     }
   };
-
-  const handleStrictUrlToggle = () => {
-    if (enableUrl) {
-      setStrictUrl(!strictUrl);
-    }
-  };
+  
 
   const handleUrlInputChange = (e) => {
     setUrlInput(e.target.value);
@@ -195,75 +213,130 @@ const WebCrawler = () => {
     }
   };
 
-  const processPrompt = (data) => {
-    const updatedChats = [...chats];
-    const chatIndex = updatedChats.findIndex(chat => chat.id === activeChat);
-    
-    if (chatIndex !== -1) {
-      const newMessages = [
-        ...updatedChats[chatIndex].messages,
-        { text: prompt, type: 'prompt' }
-      ];
-      
-      updatedChats[chatIndex].messages = newMessages;
-      setChats(updatedChats);
-      
-      // Simulate API call
-      setTimeout(() => {
-        const responseMessage = {
-          text: `Response to: ${prompt}`,
-          type: 'response',
-        };
-        
-        const updatedChatsWithResponse = [...chats];
-        const chatIndex = updatedChatsWithResponse.findIndex(chat => chat.id === activeChat);
-        
-        if (chatIndex !== -1) {
-          updatedChatsWithResponse[chatIndex].messages = [
-            ...updatedChatsWithResponse[chatIndex].messages,
-            responseMessage
-          ];
-          
-          setChats(updatedChatsWithResponse);
-        }
-      }, 1000);
-    }
-    
-    setPrompt('');
-  };
-
   // Add this function to check if the prompt has actual content
   const isValidPrompt = (text) => {
     // Check if the text is empty after trimming whitespace and newlines
     return text.trim().length > 0;
   };
 
-  // Update the handleSubmit function to check for validity
   const handleSubmit = async () => {
-    // Only proceed if the prompt is valid (not just whitespace/newlines)
     if (prompt && isValidPrompt(prompt)) {
       try {
-        let data = { prompt };
-        if (enableUrl && urls.length > 0) {
-          data.urls = urls;
-          data.strict = strictUrl;
-        }
-
-        // If no active chat, create a new one first
-        if (activeChat === null) {
-          createNewChat();
-          // Need to wait for state update to complete
-          setTimeout(() => processPrompt(data), 0);
-          return;
-        }
-
-        processPrompt(data);
+        // Always proceed with regular submission (using cache when available)
+        await submitQuery(prompt, false);
       } catch (error) {
         console.error('Error processing request:', error);
+        // Error handling code unchanged
       }
     }
   };
 
+  function safeStringToPercentage(decimalStr, decimalPlaces = 0) {
+    const num = parseFloat(decimalStr);
+    
+    if (isNaN(num)) {
+      return "0%"; // or handle error differently
+    }
+    
+    return `${(num * 100).toFixed(decimalPlaces)}%`;
+  }
+
+  function formatDuration(durationStr) {
+    // Handle null, undefined, or empty string
+    if (!durationStr) return "N/A";
+    
+    // Parse the string to a number
+    const duration = parseFloat(durationStr);
+    
+    // Check if it's a valid number
+    if (isNaN(duration)) return "N/A";
+    
+    // If duration is below 0 seconds, convert to milliseconds
+    if (duration < 0) {
+      const milliseconds = duration * 1000;
+      return `${milliseconds.toFixed(0)} milliseconds`;
+    }
+    
+    // Otherwise, format to exactly 2 decimal places and add "seconds"
+    return `${duration.toFixed(2)} seconds`;
+  }
+  
+  const submitQuery = async (userPrompt, forceCrawl) => {
+    // Set loading state to true before API call
+    setIsLoading(true);
+  
+    try {
+      let data = {
+        user_prompt: userPrompt,
+        urls: [],
+        num_seed_urls: 5,
+        force_crawl: forceCrawl,
+        use_llm_response: true
+      };
+      
+      if (enableUrl && urls.length > 0) {
+        data.urls = urls;
+      }
+      
+      // Always add prompt to chat (removed confirmingForceCrawl check)
+      const updatedChats = [...chats];
+      const chatIndex = updatedChats.findIndex(chat => chat.id === activeChat);
+      
+      if (chatIndex !== -1) {
+        updatedChats[chatIndex].messages.push({ 
+          text: userPrompt, 
+          type: 'prompt' 
+        });
+        setChats(updatedChats);
+      }
+      
+      // Show loading indicator
+      const loadingMessage = {
+        text: 'Fetching response...',
+        type: 'response',
+        isLoading: true
+      };
+      
+      const updatedChatsWithLoading = [...chats];
+      const chatIndexForLoading = updatedChatsWithLoading.findIndex(chat => chat.id === activeChat);
+      
+      if (chatIndexForLoading !== -1) {
+        updatedChatsWithLoading[chatIndexForLoading].messages.push(loadingMessage);
+        setChats(updatedChatsWithLoading);
+      }
+      
+      const response = await axios.post(apiUrl+apiPORT+'/api/crawl', data);
+      setApiResponse(response.data);
+      
+      // Update the chat with the actual response
+      const responseMessage = {
+        id: Date.now().toString(),
+        text: response.data.llm_response,
+        type: 'response',
+        fullResponse: response.data
+      };
+      
+      const finalChats = [...chats];
+      if (chatIndex !== -1) {
+        // Replace the loading message with the actual response
+        finalChats[chatIndex].messages = [
+          ...finalChats[chatIndex].messages.filter(msg => !msg.isLoading),
+          responseMessage
+        ];
+        setChats(finalChats);
+      }
+      
+      // Removed setSavedPrompt(null) call
+      setPrompt('');
+    } catch (error) {
+      console.error('Error fetching response:', error);
+      // You could also add error handling here to show an error message to the user
+    } finally {
+      // Set loading state back to false after API call completes (success or error)
+      setIsLoading(false);
+    }
+  };  
+  
   // Get current active chat
   const currentChat = chats.find(chat => chat.id === activeChat) || { messages: [] };
 
@@ -274,6 +347,196 @@ const WebCrawler = () => {
     }
   };
 
+  const MetricWithJustification = ({ label, metric }) => {
+    if (!metric) return <>{label}: N/A</>;
+    
+    return (
+      <>
+        {label}: {metric.score ? safeStringToPercentage(metric.score, 0) : "N/A"}
+        {metric.justification && (
+          <div className="justification"><br></br>Justification: {metric.justification}</div>
+        )}
+      </>
+    );
+  };  
+
+  const Message = ({ message, activeTab, onTabChange }) => {
+    const showTabs = message.type === 'response' && message.fullResponse;
+    return (
+      <div className={`message ${message.type}`}>
+        <div className="message-type">{message.type === 'prompt' ? 'You' : 'DAWC'}</div>
+        
+        {showTabs ? (
+          <>
+            <div className="tab-navigation">
+              <button 
+                className={`tab-button ${activeTab === 'llm_response' ? 'active' : ''}`}
+                onClick={() => onTabChange(message.id, 'llm_response')}
+              >
+                LLM Response
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'contents' ? 'active' : ''}`}
+                onClick={() => onTabChange(message.id, 'contents')}
+              >
+                Raw Response
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'metrics' ? 'active' : ''}`}
+                onClick={() => onTabChange(message.id, 'metrics')}
+              >
+                Metrics
+              </button>
+            </div>
+            
+              {activeTab === 'llm_response' && (
+              <div className="llm-response">
+                <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({node, inline, className, children, ...props}) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      return !inline && match ? (
+                        <SyntaxHighlighter
+                          style={oneDark}
+                          language={match[1]}
+                          PreTag="div"
+                          showLineNumbers={true}
+                          {...props}
+                        >
+                          {String(children).replace(/\n$/, '')}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
+                    }
+                  }}
+                >
+                  {message.fullResponse.llm_response}
+                </ReactMarkdown>
+              </div>
+            )}
+
+            {activeTab === 'contents' && (
+              <div className="contents-tab">
+                {message.fullResponse.results && message.fullResponse.results.length > 0 ? (
+                  <pre className="json-content" style={{ 
+                    backgroundColor: "#282828", 
+                    padding: "1rem", 
+                    borderRadius: "0.25rem", 
+                    overflowX: "auto",
+                    color: "#e0e0e0",
+                    fontFamily: "monospace",
+                    fontSize: "0.875rem",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word"
+                  }}>
+                    {JSON.stringify(message.fullResponse.results, null, 2)}
+                  </pre>
+                ) : (
+                  <div className="no-content">No search results available</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'metrics' && (
+              <div className="metrics-tab">
+                <div className="metrics-section">
+                  <h3>Time Metrics</h3>
+                  <p>Duration: {
+                    message.fullResponse.evaluation_metrics?.time_metrics?.duration_seconds 
+                      ? formatDuration(message.fullResponse.evaluation_metrics.time_metrics.duration_seconds) 
+                      : "N/A"
+                  }</p>
+                </div>
+                
+                <div className="metrics-section">
+                  <h3>Harvest Metrics</h3>
+                  <p>Relevant Pages: {message.fullResponse.evaluation_metrics?.harvest_metrics?.overall?.relevant_pages || "N/A"}</p>
+                  <p>Total Pages: {message.fullResponse.evaluation_metrics?.harvest_metrics?.overall?.total_pages || "N/A"}</p>
+                  <p>Harvest Ratio: {
+                    message.fullResponse.evaluation_metrics?.harvest_metrics?.overall?.harvest_ratio 
+                      ? safeStringToPercentage(
+                          message.fullResponse.evaluation_metrics.harvest_metrics.overall.harvest_ratio,
+                          0
+                        ) 
+                      : "N/A"
+                  }</p>
+                </div>
+                
+                {message.fullResponse.evaluation_metrics?.generative_ai_scoring_metrics && (
+                  <div className="metrics-section">
+                    <h3>AI Scoring Metrics</h3>
+                    
+                    <h4>Raw Results Evaluation</h4>
+                    <MetricWithJustification 
+                      label="Relevance" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.raw_results_evaluation?.relevance} 
+                    />
+                    <MetricWithJustification 
+                      label="Completeness" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.raw_results_evaluation?.information_completeness} 
+                    />
+                    <MetricWithJustification 
+                      label="Quality" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.raw_results_evaluation?.information_quality} 
+                    />
+                    <MetricWithJustification 
+                      label="Diversity" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.raw_results_evaluation?.diversity} 
+                    />
+                    <MetricWithJustification 
+                      label="Overall" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.raw_results_evaluation?.overall} 
+                    />
+                    
+                    <h4>LLM Response Evaluation</h4>
+                    <MetricWithJustification 
+                      label="Correctness" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.correctness} 
+                    />
+                    <MetricWithJustification 
+                      label="Relevance" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.relevance} 
+                    />
+                    <MetricWithJustification 
+                      label="Comprehensiveness" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.comprehensiveness} 
+                    />
+                    <MetricWithJustification 
+                      label="Hallucination" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.hallucination} 
+                    />
+                    <MetricWithJustification 
+                      label="Clarity" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.clarity} 
+                    />
+                    <MetricWithJustification 
+                      label="Overall" 
+                      metric={message.fullResponse.evaluation_metrics.generative_ai_scoring_metrics.llm_response_evaluation?.overall} 
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            {message.fullResponse.metadata?.from_cache && (
+              <>                
+                <div className="regenerate-button" onClick={() => submitQuery(message.fullResponse.prompt, false)}>
+                  <BiRefresh className="regenerate-icon" />
+                  <span className="regenerate-text">Regenerate Response</span>
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <div className="message-text">{message.text}</div>
+        )}
+      </div>
+    );
+  };
+  
   return (
     <div className="app-container">
       <div className="sidebar">
@@ -345,10 +608,12 @@ const WebCrawler = () => {
           <div className="chat-area" ref={chatAreaRef}>
             {activeChat !== null && currentChat && currentChat.messages.length > 0 ? (
               currentChat.messages.map((message, index) => (
-                <div key={index} className={`message ${message.type}`}>
-                  <div className="message-type">{message.type === 'prompt' ? 'You' : 'Assistant'}</div>
-                  <div className="message-text">{message.text}</div>
-                </div>
+                <Message 
+                  key={index} 
+                  message={message} 
+                  activeTab={messageTabStates[message.id] || 'llm_response'} 
+                  onTabChange={handleTabChange}
+                />
               ))
             ) : (
               <div className="empty-chat-area">
@@ -357,8 +622,7 @@ const WebCrawler = () => {
                 <p>Send a message to start a new conversation</p>
               </div>
             )}
-          </div>
-          
+          </div>       
           <div className="footer">
             <div className="toggle-container">
               <label className="toggle-label">
@@ -367,19 +631,6 @@ const WebCrawler = () => {
                   className={`toggle ${enableUrl ? 'active' : ''}`}
                   onClick={handleEnableUrlToggle}
                   style={{ backgroundColor: enableUrl ? '#2563eb' : '#3f3f3f' }}
-                ></div>
-              </label>
-              
-              <label className="toggle-label">
-                <span>Strict URL</span>
-                <div
-                  className={`toggle ${strictUrl ? 'active' : ''}`}
-                  onClick={handleStrictUrlToggle}
-                  style={{ 
-                    backgroundColor: strictUrl ? '#2563eb' : '#3f3f3f', 
-                    opacity: enableUrl ? 1 : 0.5,
-                    cursor: enableUrl ? 'pointer' : 'not-allowed'
-                  }}
                 ></div>
               </label>
             </div>
@@ -410,6 +661,7 @@ const WebCrawler = () => {
                     e.target.style.overflowX = 'auto';
                   }
                 }}
+                disabled={isLoading}
               />
               
               {enableUrl && (
@@ -424,9 +676,14 @@ const WebCrawler = () => {
               <button
                 className="icon-button submit-button"
                 onClick={handleSubmit}
-                disabled={!prompt || !isValidPrompt(prompt)}
+                disabled={!prompt || !isValidPrompt(prompt) || isLoading}
+                
               >
                 ➤
+                {isLoading ? 
+                  <i className="fas fa-spinner fa-spin"></i> : 
+                  <i className="fas fa-paper-plane"></i>
+                }
               </button>
             </div>
           </div>

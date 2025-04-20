@@ -336,6 +336,11 @@ html, body, #root {
   box-sizing: border-box;
 }
 
+.prompt-input:disabled {
+  background-color: #1e1e1e;
+  color: #777;
+}
+
 .icon-button {
   background: none;
   border: none;
@@ -363,6 +368,11 @@ html, body, #root {
   color: #555;
   cursor: not-allowed;
   background-color: transparent;
+}
+
+.icon-button.submit-button:disabled {
+  color: #555;
+  cursor: not-allowed;
 }
 
 .url-button {
@@ -526,6 +536,127 @@ html, body, #root {
   color: #777;
   padding: 2rem 0;
   font-style: italic;
+}
+
+/* Tab Navigation */
+.tab-navigation {
+  display: flex;
+  border-bottom: 1px solid #333;
+  margin-bottom: 1rem;
+}
+
+.tab-button {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-radius: 0.25rem 0.25rem 0 0;
+  background-color: #282828;
+  color: #e0e0e0;
+  margin-right: 0.25rem;
+  transition: background-color 0.2s;
+}
+
+.tab-button:hover {
+  background-color: #333;
+}
+
+.tab-button.active {
+  background-color: #2563eb;
+  color: white;
+}
+
+/* Tab Content Styles */
+.llm-response, .contents-tab, .metrics-tab {
+  padding: 0.5rem;
+  background-color: #1a1a1a;
+  border-radius: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.search-result {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #333;
+}
+
+.search-result h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #e0e0e0;
+}
+
+.search-result .source {
+  font-size: 0.875rem;
+  color: #2563eb;
+  margin-bottom: 0.5rem;
+}
+
+.search-result .content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.875rem;
+}
+
+.metrics-section {
+  margin-bottom: 1.5rem;
+}
+
+.metrics-section h3 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: #e0e0e0;
+}
+
+.metrics-section h4 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: #cccccc;
+}
+
+.metrics-section p {
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.justification {
+  margin-top: -0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 1rem;
+  color: #999;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.regenerate-button {
+  display: flex;
+  align-items: center;
+  margin-top: 1rem;
+  cursor: pointer;
+  width: fit-content;
+  overflow: hidden;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+  padding: 0.5rem;
+}
+
+.regenerate-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.regenerate-icon {
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+
+.regenerate-text {
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: width 0.3s ease;
+  color: #e0e0e0;
+}
+
+.regenerate-button:hover .regenerate-text {
+  width: 160px; /* Adjust based on text length */
 }
 
 /* Media queries for responsiveness */
