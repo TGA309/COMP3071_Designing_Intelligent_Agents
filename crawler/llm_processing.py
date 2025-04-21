@@ -94,12 +94,12 @@ def generate_llm_response(user_prompt, crawled_content):
     for i, item in enumerate(crawled_content, 1):
         # Format source header with metadata
         source_header = f"SOURCE [{i}]"
+        if 'source' in item and item['source']:
+            source_header += f" (Source: {item['source']})" 
         if 'domain' in item and item['domain']:
-            source_header += f" from {item['domain']}"
+            source_header += f" from Domain: {item['domain']}"
         if 'title' in item and item['title']:
             source_header += f" - \"{item['title']}\""
-        if 'url' in item and item['url']:
-            source_header += f" (URL: {item['url']})"  # Add URL information here
             
         # Add the content with clear separation
         prompt += f"\n\n{source_header}\n{'_'*80}\n{item.get('content', 'No content available')}\n{'_'*80}"
@@ -134,11 +134,25 @@ def generate_llm_response(user_prompt, crawled_content):
     After completing your answer, add a section titled '## Sources' followed by a numbered list of all sources used, with titles linked to their domains using proper Markdown link syntax:
     
     ## Sources
-    1. [Domain1](url_of_domain1) - [Title of Source 1](content_url_of_domain_1)
-    2. [Domain2](url_of_domain2) - [Title of Source 2](content_url_of_domain_2)
+    1. [Domain1](domain_url_1) - [Title_1](source_url_1)
+    2. [Domain2](domain_url_2) - [Title_2](source_url_2)
     etc.
 
-    IMPORTANT: Ensure your response is in a pure Markdown format without escape sequences such as \\n, it should be \n instead. The url_of_domain can be consturcted from content_url_of_domain. If you have not used a source then do not mention it in sources but still cite it using the rules given above. Use the exact urls for each source without changing them at all.
+    IMPORTANT: 
+    Ensure your response is in pure Markdown format without escape sequences. When creating the Sources section:
+
+    1. Only include sources that you actually referenced in your answer
+    2. Format each source entry as follows:
+    - [Domain name](domain_url) - [Title](source_url)
+    - The domain_url should be the value that appears after "from Domain:" in the source header
+    - The source_url should be the value that appears after "Source:" in the source header
+    3. If information is missing:
+    - If the title is missing, use [No Title](source_url)
+    - If domain_url is missing, use the domain name without brackets or links
+    - If source_url is missing, mention the title without making it a link
+    4. Use the exact URLs as provided in the original sources without modifications
+    5. Only include sources that you actually referenced in your answer
+
     """
     
     response = call_mistral_api(prompt)
