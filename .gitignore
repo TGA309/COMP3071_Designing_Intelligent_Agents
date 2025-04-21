@@ -190,8 +190,10 @@ cython_debug/
 logs/
 models/
 crawler_state/
-crawler_state_good/
+crawler_state_current/
+crawler_state_old/
 old/
+results/
 
 # Vite
 # Logs

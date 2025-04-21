@@ -445,7 +445,7 @@ const WebCrawler = () => {
               <div className="metrics-tab">
                 <div className="metrics-section">
                   <h3>Time Metrics</h3>
-                  <p>Duration: {
+                  <p>Response Latency: {
                     message.fullResponse.evaluation_metrics?.time_metrics?.duration_seconds 
                       ? formatDuration(message.fullResponse.evaluation_metrics.time_metrics.duration_seconds) 
                       : "N/A"
