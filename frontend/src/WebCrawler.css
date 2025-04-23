@@ -1,4 +1,7 @@
-/* Base Styles */
+/* ===============================================================
+   BASE STYLES
+   Reset defaults and set global typography
+   =============================================================== */
 html, body, #root {
   width: 100%;
   height: 100%;
@@ -8,29 +11,36 @@ html, body, #root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
-/* Main Container */
+/* ===============================================================
+   MAIN CONTAINER 
+   Primary layout structure for the application
+   =============================================================== */
 .app-container {
   display: flex;
   width: 100%;
-  height: 100vh;
+  height: 100vh; /* Use viewport height for full-screen experience */
   background-color: #121212;
-  overflow: hidden;
+  overflow: hidden; /* Prevent scrollbars on main container */
   position: relative;
 }
 
-/* Sidebar Styles */
+/* ===============================================================
+   SIDEBAR STYLES
+   Left navigation panel containing chat history
+   =============================================================== */
 .sidebar {
-  width: 18.75rem;
+  width: 18.75rem; /* Fixed width for consistency */
   height: 100%;
-  background-color: #1A1A1A;
-  border-right: 0.0625rem solid #333;
-  overflow-y: auto;
+  background-color: #1A1A1A; /* Slightly lighter than main background */
+  border-right: 0.0625rem solid #333; /* Subtle separator */
+  overflow-y: auto; /* Scrollable when content overflows */
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  z-index: 5;
+  flex-shrink: 0; /* Prevent sidebar from shrinking */
+  z-index: 5; /* Ensure sidebar appears above other content */
 }
 
+/* Sidebar header with title and new chat button */
 .sidebar-header {
   padding: 1rem;
   border-bottom: 0.0625rem solid #333;
@@ -45,6 +55,7 @@ html, body, #root {
   font-weight: bold;
 }
 
+/* Primary action button - uses blue highlight color */
 .new-chat-button {
   background-color: #2563eb;
   color: white;
@@ -53,19 +64,21 @@ html, body, #root {
   padding: 0.5rem 1rem;
   cursor: pointer;
   font-size: 0.875rem;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s; /* Smooth hover effect */
 }
 
 .new-chat-button:hover {
-  background-color: #1e4fbb;
+  background-color: #1e4fbb; /* Darker blue on hover */
 }
 
+/* Container for chat history list */
 .chat-list {
   flex-grow: 1;
   padding: 0.5rem;
   overflow-y: auto;
 }
 
+/* Empty state styling for when no chats exist */
 .empty-chat-list {
   display: flex;
   flex-direction: column;
@@ -83,6 +96,7 @@ html, body, #root {
   color: #555;
 }
 
+/* Empty state styling for chat area */
 .empty-chat-area {
   display: flex;
   flex-direction: column;
@@ -110,11 +124,12 @@ html, body, #root {
   font-size: 1rem;
 }
 
+/* Individual chat history item styling */
 .chat-item {
   padding: 0.75rem;
   margin-bottom: 0.5rem;
   border-radius: 0.25rem;
-  background-color: #282828;
+  background-color: #282828; /* Subtle contrast with sidebar */
   color: #e0e0e0;
   cursor: pointer;
   display: flex;
@@ -124,13 +139,14 @@ html, body, #root {
 }
 
 .chat-item:hover {
-  background-color: #333;
+  background-color: #333; /* Slightly lighter on hover */
 }
 
 .chat-item.active {
-  background-color: #2563eb;
+  background-color: #2563eb;  /* Blue highlight for selected chat */
 }
 
+/* Prevent chat title overflow with ellipsis */
 .chat-title {
   white-space: nowrap;
   overflow: hidden;
@@ -138,11 +154,13 @@ html, body, #root {
   flex-grow: 1;
 }
 
+/* Action buttons container for chat items */
 .chat-actions {
   display: flex;
   align-items: center;
 }
 
+/* Button styling for rename and delete actions */
 .rename-button, .delete-button {
   background: none;
   border: none;
@@ -157,9 +175,10 @@ html, body, #root {
 
 .rename-button:hover, .delete-button:hover {
   color: #e0e0e0;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.1); /* Subtle highlight on hover */
 }
 
+/* Input field for renaming chats */
 .rename-input {
   width: 100%;
   background-color: #333;
@@ -170,36 +189,44 @@ html, body, #root {
   font-size: 0.875rem;
 }
 
-/* Main Content Area */
+/* ===============================================================
+   MAIN CONTENT AREA
+   Central section containing chat messages and input
+   =============================================================== */
 .main-content {
   flex-grow: 1;
   display: flex;
   height: 100%;
-  transition: padding-right 0.3s ease;
+  transition: padding-right 0.3s ease; /* Smooth transition when popup opens */
   width: 100%;
   box-sizing: border-box;
   padding: 0;
 }
 
+/* Add space for URL popup when it's open */
 .main-content.with-popup {
   padding-right: 31.25rem; /* Make space for the popup */
 }
 
+/* Container for chat functionality with max width for readability */
 .chat-container {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 50rem;
-  margin: 0 auto;
+  max-width: 50rem; /* Limit width for better readability */
+  margin: 0 auto; /* Center in available space */
   padding: 1.25rem;
   height: 100%;
   box-sizing: border-box;
 }
 
-/* Chat Area */
+/* ===============================================================
+   CHAT AREA
+   Message display section with scrolling capability
+   =============================================================== */
 .chat-area {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow-y: auto; /* Enable scrolling for long conversations */
   padding: 1rem;
   background-color: #1A1A1A;
   border: 0.0625rem solid #333;
@@ -207,33 +234,37 @@ html, body, #root {
   margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1rem; /* Consistent spacing between messages */
 }
 
+/* Individual message container */
 .message {
   padding: 1rem;
   border-radius: 0.5rem;
   color: #e0e0e0;
-  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1);  /* Subtle shadow for depth */
   width: 100%;
   box-sizing: border-box;
   transition: all 0.3s ease;
 }
 
+/* User message styling - darker background, positioned right */
 .message.prompt {
   background-color: #323232;
   align-self: flex-end;
   max-width: 90%;
-  border-top-right-radius: 0.125rem;
+  border-top-right-radius: 0.125rem; /* Speech bubble effect */
 }
 
+/* System response styling - lighter background, positioned left */
 .message.response {
   background-color: #2a2a2a;
   align-self: flex-start;
   max-width: 90%;
-  border-top-left-radius: 0.125rem;
+  border-top-left-radius: 0.125rem; /* Speech bubble effect */
 }
 
+/* Label for message sender (You/DAWC) */
 .message-type {
   font-weight: bold;
   margin-bottom: 0.5rem;
@@ -241,12 +272,16 @@ html, body, #root {
   color: #999;
 }
 
+/* Message content with proper text wrapping */
 .message-text {
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre-wrap; /* Preserve line breaks and spaces */
+  word-break: break-word; /* Prevent overflow by breaking words */
 }
 
-/* Footer Area */
+/* ===============================================================
+   FOOTER AREA
+   Bottom section containing input controls
+   =============================================================== */
 .footer {
   background-color: #1A1A1A;
   border: 0.0625rem solid #333;
@@ -257,15 +292,16 @@ html, body, #root {
   margin-bottom: 1rem;
 }
 
-/* Toggle Container */
+/* Toggle section for URL mode and other controls */
 .toggle-container {
   display: flex;
   align-items: center;
   margin-bottom: 1rem;
   gap: 1rem;
-  flex-wrap: wrap;
+  flex-wrap: wrap; /* Allow wrapping on small screens */
 }
 
+/* Label styling for toggle buttons */
 .toggle-label {
   display: flex;
   align-items: center;
@@ -278,6 +314,7 @@ html, body, #root {
   margin-right: 0.5rem;
 }
 
+/* Custom toggle switch styling */
 .toggle {
   position: relative;
   width: 3rem;
@@ -287,6 +324,7 @@ html, body, #root {
   cursor: pointer;
 }
 
+/* Toggle switch knob */
 .toggle:after {
   content: '';
   position: absolute;
@@ -296,14 +334,18 @@ html, body, #root {
   background-color: white;
   top: 0.125rem;
   left: 0.125rem;
-  transition: left 0.3s;
+  transition: left 0.3s; /* Smooth movement animation */
 }
 
+/* Active state for toggle switch - move knob to right */
 .toggle.active:after {
   left: 1.625rem;
 }
 
-/* Input Container */
+/* ===============================================================
+   INPUT CONTAINER
+   Text input area and send button
+   =============================================================== */
 .input-container {
   display: flex;
   align-items: flex-end;
@@ -318,6 +360,7 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* Textarea for user input with auto-expanding height */
 .prompt-input {
   flex-grow: 1;
   border: none;
@@ -326,21 +369,23 @@ html, body, #root {
   padding: 0.5rem;
   background-color: transparent;
   color: #e0e0e0;
-  resize: none;
+  resize: none; /* Disable manual resizing */
   overflow-y: auto;
   min-height: 1.5rem;
-  max-height: 12rem;
+  max-height: 12rem; /* Limit maximum height */
   line-height: 1.5;
-  font-family: inherit;
+  font-family: inherit; /* Maintain consistent font */
   width: calc(100% - 2.5rem);
   box-sizing: border-box;
 }
 
+/* Disabled state styling */
 .prompt-input:disabled {
   background-color: #1e1e1e;
   color: #777;
 }
 
+/* Button styling for icons (send, URL toggle) */
 .icon-button {
   background: none;
   border: none;
@@ -348,7 +393,7 @@ html, body, #root {
   padding: 0.5rem;
   font-size: 1.125rem;
   color: #999;
-  border-radius: 50%;
+  border-radius: 50%; /* Circular button shape */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -361,9 +406,10 @@ html, body, #root {
 
 .icon-button:hover {
   color: #e0e0e0;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.1); /* Subtle highlight effect */
 }
 
+/* Disabled button state */
 .icon-button:disabled {
   color: #555;
   cursor: not-allowed;
@@ -375,15 +421,20 @@ html, body, #root {
   cursor: not-allowed;
 }
 
+/* URL toggle button - blue highlight color */
 .url-button {
   color: #2563eb;
 }
 
+/* Send button - blue highlight color */
 .submit-button {
   color: #2563eb;
 }
 
-/* URL Popup */
+/* ===============================================================
+   URL POPUP
+   Side panel for adding and managing URLs
+   =============================================================== */
 .url-popup {
   position: fixed;
   top: 0;
@@ -392,12 +443,13 @@ html, body, #root {
   height: 100vh;
   background-color: #1A1A1A;
   border-left: 0.0625rem solid #333;
-  z-index: 10;
+  z-index: 10;  /* Ensure popup appears above other content */
   display: flex;
   flex-direction: column;
-  animation: slideIn 0.3s ease;
+  animation: slideIn 0.3s ease; /* Entrance animation */
 }
 
+/* Animation for popup entrance */
 @keyframes slideIn {
   from {
     transform: translateX(100%);
@@ -407,6 +459,7 @@ html, body, #root {
   }
 }
 
+/* Header section for popup with title and close button */
 .popup-header {
   display: flex;
   justify-content: space-between;
@@ -421,6 +474,7 @@ html, body, #root {
   font-size: 1.25rem;
 }
 
+/* Close button with hover effect */
 .popup-close-button {
   background: none;
   border: none;
@@ -447,6 +501,7 @@ html, body, #root {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+/* Input area for adding new URLs */
 .url-input-container {
   padding: 1rem;
   border-bottom: 0.0625rem solid #333;
@@ -454,6 +509,7 @@ html, body, #root {
   gap: 0.5rem;
 }
 
+/* Input field for URL entry */
 .url-input {
   flex-grow: 1;
   padding: 0.75rem;
@@ -464,6 +520,7 @@ html, body, #root {
   font-size: 0.875rem;
 }
 
+/* Add URL button - uses primary blue color */
 .add-url-button {
   background-color: #2563eb;
   color: white;
@@ -476,12 +533,13 @@ html, body, #root {
 }
 
 .add-url-button:hover {
-  background-color: #1e4fbb;
+  background-color: #1e4fbb; /* Darker blue on hover */
 }
 
+/* Container for list of added URLs */
 .url-list {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow-y: auto; /* Enable scrolling for many URLs */
   padding: 1rem;
 }
 
@@ -492,6 +550,8 @@ html, body, #root {
   font-size: 1rem;
 }
 
+
+/* Individual URL item styling */
 .url-item {
   display: flex;
   justify-content: space-between;
@@ -500,7 +560,7 @@ html, body, #root {
   margin-bottom: 0.5rem;
   background-color: #282828;
   border-radius: 0.25rem;
-  word-break: break-all;
+  word-break: break-all; /* Break long URLs to prevent overflow */
 }
 
 .url-text {
@@ -510,6 +570,7 @@ html, body, #root {
   color: #e0e0e0;
 }
 
+/* Remove URL button styling */
 .remove-url-button {
   background: none;
   border: none;
@@ -521,7 +582,7 @@ html, body, #root {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 50%;
+  border-radius: 50%; /* Circular button */
   flex-shrink: 0;
   transition: background-color 0.2s, color 0.2s;
 }
@@ -531,6 +592,7 @@ html, body, #root {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+/* Empty state for URL list */
 .no-urls {
   text-align: center;
   color: #777;
@@ -538,17 +600,21 @@ html, body, #root {
   font-style: italic;
 }
 
-/* Tab Navigation */
+/* ===============================================================
+   TAB NAVIGATION
+   Tabs for switching between response views
+   =============================================================== */
 .tab-navigation {
   display: flex;
   border-bottom: 1px solid #333;
   margin-bottom: 1rem;
 }
 
+/* Individual tab button styling */
 .tab-button {
   padding: 0.5rem 1rem;
   cursor: pointer;
-  border-radius: 0.25rem 0.25rem 0 0;
+  border-radius: 0.25rem 0.25rem 0 0; /* Rounded top corners only */
   background-color: #282828;
   color: #e0e0e0;
   margin-right: 0.25rem;
@@ -559,12 +625,16 @@ html, body, #root {
   background-color: #333;
 }
 
+/* Active tab highlighting */
 .tab-button.active {
-  background-color: #2563eb;
+  background-color: #2563eb; /* Blue highlight for active tab */
   color: white;
 }
 
-/* Tab Content Styles */
+/* ===============================================================
+   TAB CONTENT STYLES
+   Styling for different content tabs
+   =============================================================== */
 .llm-response, .contents-tab, .metrics-tab {
   padding: 0.5rem;
   background-color: #1a1a1a;
@@ -572,30 +642,7 @@ html, body, #root {
   margin-bottom: 1rem;
 }
 
-.search-result {
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #333;
-}
-
-.search-result h3 {
-  margin-top: 0;
-  margin-bottom: 0.5rem;
-  color: #e0e0e0;
-}
-
-.search-result .source {
-  font-size: 0.875rem;
-  color: #2563eb;
-  margin-bottom: 0.5rem;
-}
-
-.search-result .content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.875rem;
-}
-
+/* Metrics section styling */
 .metrics-section {
   margin-bottom: 1.5rem;
 }
@@ -617,6 +664,7 @@ html, body, #root {
   font-size: 0.875rem;
 }
 
+/* Justification text for metrics */
 .justification {
   margin-top: -0.5rem;
   margin-bottom: 1rem;
@@ -626,6 +674,7 @@ html, body, #root {
   line-height: 1.4;
 }
 
+/* Button to regenerate responses */
 .regenerate-button {
   display: flex;
   align-items: center;
@@ -647,11 +696,12 @@ html, body, #root {
   margin-right: 0.5rem;
 }
 
+/* Text that expands on hover for regenerate button */
 .regenerate-text {
   width: 0;
   overflow: hidden;
   white-space: nowrap;
-  transition: width 0.3s ease;
+  transition: width 0.3s ease; /* Animate width expansion */
   color: #e0e0e0;
 }
 
@@ -659,21 +709,51 @@ html, body, #root {
   width: 160px; /* Adjust based on text length */
 }
 
-/* Media queries for responsiveness */
+/* Spinner animation for loading states */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Inline spinner that appears next to text */
+.loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(150, 150, 150, 0.2);
+  border-top-color: #2563eb; /* Blue spinner color */
+  border-radius: 50%;
+  margin-right: 8px;
+  animation: spin 1s linear infinite; /* Continuous rotation */
+  vertical-align: middle;
+}
+
+/* Container to align spinner with text */
+.loading-message-container {
+  display: flex;
+  align-items: center;
+}
+
+/* ===============================================================
+   RESPONSIVE DESIGN
+   Media queries for different screen sizes
+   =============================================================== */
+/* Large screens - adjust popup behavior */
 @media (max-width: 1200px) {
   .main-content.with-popup {
-    padding-right: 0;
+    padding-right: 0; /* Remove padding since popup will overlay */
   }
 
   .url-popup {
     width: 100%;
-    max-width: 31.25rem;
+    max-width: 31.25rem; /* Limit maximum width */
   }
 }
 
+/* Tablet and mobile screens - stack layout vertically */
 @media (max-width: 768px) {
   .app-container {
-    flex-direction: column;
+    flex-direction: column; /* Stack sidebar above content */
   }
 
   .sidebar {
@@ -683,6 +763,7 @@ html, body, #root {
     border-bottom: 0.0625rem solid #333;
   }
 
+  /* Reduce padding for smaller screens */
   .chat-container {
     padding: 0.75rem;
   }
@@ -695,6 +776,7 @@ html, body, #root {
     padding: 0.75rem;
   }
 
+  /* Adjust popup to slide up from bottom on mobile */
   .url-popup {
     width: 100%;
     height: calc(100vh - 8rem);
