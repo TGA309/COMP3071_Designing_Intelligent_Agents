@@ -19,12 +19,12 @@ logger = setup_logger()
 def perform_crawl_and_query(
     prompt: str,
     urls: Optional[List[str]] = None,
-    n: Optional[int] = None, # Allow overriding config default
-    num_seed_urls: Optional[int] = None, # Allow overriding config default
-    max_depth: Optional[int] = None, # Allow overriding config default
-    force_crawl: bool = False, # Flag to force crawl even if cache is sufficient
-    relevance_threshold: Optional[float] = None, # Allow overriding config default
-    use_llm_response: bool = False # LLM response flag
+    n: Optional[int] = None,
+    num_seed_urls: Optional[int] = None,
+    max_depth: Optional[int] = None,
+    force_crawl: bool = False,
+    relevance_threshold: Optional[float] = None,
+    use_llm_response: bool = False
 ) -> Dict:
     """
     Performs a crawl operation based on a prompt and optional URLs,
@@ -43,71 +43,113 @@ def perform_crawl_and_query(
     Returns:
         Dict containing status, results, metadata, and optional LLM response.
     """
+    # Initialize tracking variables
+    original_prompt = prompt
+    crawler = None
+    results = []
+    from_cache = False
+    llm_response = None
+    error_messages = []
+    process_status = "success"  # Will be downgraded if errors occur
+    
+    # Initialize evaluation metrics
+    evaluation_metrics = EvaluationMetrics()
+
     logger.info(f"Received crawl request for prompt: '{prompt}'")
     if urls: logger.info(f"Provided URLs: {urls}")
     if force_crawl: logger.info("`force_crawl` flag is set, will crawl regardless of cache.")
-
-    # Initialize evaluation metrics
-    evaluation_metrics = EvaluationMetrics()
     
     # Start timing measurement
-    evaluation_metrics.start_timer()
-
-    # Do query expansion on prompt
-    original_prompt = prompt
-    query_expanded_list = query_expansion(prompt)
-    search_prompt = format_keywords_for_search(query_expanded_list)
-    prompt_keywords = extract_keywords(query_expanded_list)
-    query_prompt = strip_and_join_with_spaces(prompt_keywords)
-
-    logger.info(f"Original prompt: {original_prompt}")
-    logger.info(f"Query Expanded List: {query_expanded_list}")
-    logger.info(f"Search Prompt: {search_prompt}")
-    logger.info(f"Query Prompt: {query_prompt}")
-    logger.info(f"Prompt Keywords: {prompt_keywords}")
-    
-
-    # Use provided parameters or fall back to config defaults
-    num_results_final = n if n is not None else config.api.crawl.num_results
-    num_seed_urls_final = num_seed_urls if num_seed_urls is not None else config.api.crawl.num_seed_urls
-    max_depth_final = max_depth if max_depth is not None else config.api.crawl.max_depth
-    base_relevance_threshold_final = relevance_threshold if relevance_threshold is not None else config.api.crawl.relevance_threshold
-
-    results = []
-    from_cache = False
-    crawler = None # Initialize crawler variable
-
     try:
-        # 1. Instantiate the crawler - it loads existing state automatically
+        evaluation_metrics.start_timer()
+    except Exception as e:
+        logger.error(f"Failed to start timer: {e}", exc_info=True)
+        error_messages.append(f"Timer error: {str(e)}")
+    
+    # 1. INITIALIZATION PHASE
+    try:
+        # Query expansion
+        query_expanded_list = query_expansion(prompt)
+        search_prompt = format_keywords_for_search(query_expanded_list)
+        prompt_keywords = extract_keywords(query_expanded_list)
+        query_prompt = strip_and_join_with_spaces(prompt_keywords)
+        
+        # Configuration setup
+        num_results_final = n if n is not None else config.api.crawl.num_results
+        num_seed_urls_final = num_seed_urls if num_seed_urls is not None else config.api.crawl.num_seed_urls
+        max_depth_final = max_depth if max_depth is not None else config.api.crawl.max_depth
+        base_relevance_threshold_final = relevance_threshold if relevance_threshold is not None else config.api.crawl.relevance_threshold
+        
+        logger.debug(f"Original prompt: {original_prompt}")
+        logger.debug(f"Query Expanded List: {query_expanded_list}")
+        logger.debug(f"Search Prompt: {search_prompt}")
+        logger.debug(f"Query Prompt: {query_prompt}")
+        logger.debug(f"Prompt Keywords: {prompt_keywords}")
+    except Exception as e:
+        logger.error(f"Initialization error: {e}", exc_info=True)
+        error_messages.append(f"Initialization error: {str(e)}")
+        process_status = "error"
+        # Early return if we can't even initialize
+        return {
+            "status": "error",
+            "prompt": original_prompt,
+            "error": f"Failed during initialization: {str(e)}",
+            "results": [],
+            "metadata": {"initialization_failed": True},
+            "llm_response": "N/A",
+            "evaluation_metrics": _get_partial_metrics(evaluation_metrics)
+        }
+    
+    # 2. CRAWLER INITIALIZATION
+    try:
         crawler = AdaptiveWebCrawler()
-
-        # 2. Check cache (existing store) before crawling if force_crawl is False
+    except Exception as e:
+        logger.error(f"Failed to initialize crawler: {e}", exc_info=True)
+        error_messages.append(f"Crawler initialization error: {str(e)}")
+        process_status = "error"
+        # Early return if crawler fails to initialize
+        return {
+            "status": "error",
+            "prompt": original_prompt,
+            "error": f"Failed to initialize crawler: {str(e)}",
+            "results": [],
+            "metadata": {"crawler_initialization_failed": True},
+            "llm_response": "N/A",
+            "evaluation_metrics": _get_partial_metrics(evaluation_metrics)
+        }
+    
+    # 3. CACHE CHECK PHASE
+    cache_error = None
+    try:
         if not force_crawl:
             logger.info("Checking existing store (cache) for relevant results...")
             initial_results = crawler.query(query_prompt, n=num_results_final)
-            # Check if enough results meet the base relevance threshold
+            
             if initial_results and len(initial_results) >= num_results_final and all(r['weighted_score'] >= base_relevance_threshold_final for r in initial_results):
-                logger.info(f"Found {len(initial_results)} sufficient results in cache meeting threshold {base_relevance_threshold_final:.2f}. Skipping crawl.")
+                logger.info(f"Found {len(initial_results)} sufficient results in cache.")
                 results = initial_results
-                
-                # Record cache access in harvest ratio metric
                 crawler.harvest_ratio_metric.record_cache_access(
                     results=initial_results,
                     base_relevance_threshold=base_relevance_threshold_final
                 )
-                
-                # Set from_cache flag to True
                 from_cache = True
             else:
-                 logger.info("Existing store does not contain sufficient results or threshold not met. Proceeding with crawl.")
+                logger.info("Existing store does not contain sufficient results or threshold not met. Proceeding with crawl.")
         else:
             logger.info("`force_crawl` is True. Skipping cache check.")
-
-
-        # 3. Perform Crawl if not served from cache
-        if not from_cache:
+    
+    except Exception as e:
+        logger.error(f"Cache check error: {e}", exc_info=True)
+        error_messages.append(f"Cache check error: {str(e)}")
+        cache_error = str(e)
+        process_status = "partial_success"  # Continue despite cache error
+    
+    # 4. CRAWL PHASE (if not from cache)
+    crawl_error = None
+    if not from_cache:
+        try:
             logger.info("Starting crawl process...")
-            crawler.crawl(
+            any_seed_url_crawled = crawler.crawl(
                 original_prompt=original_prompt,
                 search_prompt=search_prompt,
                 query_prompt=query_prompt,
@@ -117,85 +159,117 @@ def perform_crawl_and_query(
                 max_depth=max_depth_final,
                 base_relevance_threshold=base_relevance_threshold_final
             )
-            # Query again after crawling to get the final results
+
+            if not any_seed_url_crawled:
+                from_cache = True
+            
+            # Query to get results after crawling
             results = crawler.query(query_prompt, n=num_results_final)
-            logger.info("Crawl process finished.")
-
-        # Stop the timer before generating LLM Response and Evaluation
-        evaluation_metrics.stop_timer()
-
-        # --- Generate LLM Response (Optional) ---
-        llm_response = None
-        
-        if use_llm_response and results:
+            logger.info(f"Crawl complete, obtained {len(results)} results.")
+        except Exception as e:
+            logger.error(f"Crawl error: {e}", exc_info=True)
+            error_messages.append(f"Crawl error: {str(e)}")
+            crawl_error = str(e)
+            process_status = "partial_success"
+            
+            # Try to get any available results despite crawl error
             try:
-                logger.info("Generating LLM response...")
-                llm_response = generate_llm_response(original_prompt, results)
-                logger.info("LLM response generated.")
-            except Exception as llm_err:
-                logger.error(f"Failed to generate LLM response: {llm_err}", exc_info=True)
-                llm_response = f"Error generating LLM response: {llm_err}"  # Include error in response
-
-
-        # --- Prepare Metadata ---
-        # Access final state from crawler instance and store builder
+                emergency_results = crawler.query(query_prompt, n=num_results_final)
+                if emergency_results:
+                    logger.info(f"Retrieved {len(emergency_results)} results despite crawl error.")
+                    results = emergency_results
+            except Exception as query_e:
+                logger.error(f"Failed to retrieve results after crawl error: {query_e}", exc_info=True)
+    
+    # Stop the timer before additional processing
+    try:
+        evaluation_metrics.stop_timer()
+    except Exception as e:
+        logger.error(f"Failed to stop timer: {e}", exc_info=True)
+        error_messages.append(f"Timer error: {str(e)}")
+    
+    # 5. LLM RESPONSE PHASE (if requested)
+    llm_error = None
+    if use_llm_response and results:
+        try:
+            logger.info("Generating LLM response...")
+            llm_response = generate_llm_response(original_prompt, results)
+            logger.info("LLM response generated successfully.")
+        except Exception as e:
+            logger.error(f"LLM generation error: {e}", exc_info=True)
+            error_messages.append(f"LLM error: {str(e)}")
+            llm_error = str(e)
+            process_status = "partial_success"
+    
+    # 6. METADATA COLLECTION
+    try:
         final_visited_count = len(crawler.visited_urls) if crawler else 0
-        # Get content store length directly from the builder module
         final_content_count = len(builder.get_content_store())
-
+        
         metadata = {
             "urls": {
                 "visited_total": final_visited_count,
                 "seed_urls_used": len(urls) if urls else num_seed_urls_final,
             },
             "content_collected_total": final_content_count,
-            "from_cache": from_cache # Include the cache flag
+            "from_cache": from_cache
         }
         
-        # Get comprehensive evaluation metrics
-        evaluation_results = evaluation_metrics.evaluate(
-            original_prompt=original_prompt,
-            crawled_results=results,
-            llm_response=llm_response if use_llm_response and llm_response else None,
-            harvest_ratio_metrics=crawler.harvest_ratio_metric.get_metrics()
-        )
-        
-        # --- Build Final Response ---
-        response = {
-            "status": "success",
-            "prompt": original_prompt,
-            "results": results,
-            "metadata": metadata,
-            "llm_response": llm_response if (use_llm_response and llm_response) else "N/A",
-            "evaluation_metrics": evaluation_results,
-        }
-        
-        logger.info(f"Request completed successfully. Returning {len(results)} results. (Served from cache: {from_cache})")
-        return response
-        
+        # Add error information to metadata
+        if cache_error:
+            metadata["cache_error"] = cache_error
+        if crawl_error:
+            metadata["crawl_error"] = crawl_error
+        if llm_error:
+            metadata["llm_error"] = llm_error
     except Exception as e:
-        # Stop timer even in case of error
-        if 'evaluation_metrics' in locals():
-            evaluation_metrics.stop_timer()
-            
-        logger.error(f"Critical error in perform_crawl_and_query: {e}", exc_info=True)
-        
-        # Attempt to get some metadata even in case of error
-        try:
-            visited_count = len(crawler.visited_urls) if crawler else 0
-            content_count = len(builder.get_content_store())
-        except:
-            visited_count = 0
-            content_count = 0
-        
-        return {
-            "status": "error",
-            "prompt": original_prompt,
-            "error": f"An unexpected error occurred: {str(e)}",
-            "results": [],
-            "metadata": {
-                "urls": {"visited_total": visited_count},
-                "content_collected_total": content_count,
-                "from_cache": False  # Assume not from cache if error occurred
-            }
-        }
+        logger.error(f"Metadata collection error: {e}", exc_info=True)
+        error_messages.append(f"Metadata error: {str(e)}")
+        metadata = {"metadata_collection_failed": True}
+        process_status = "partial_success"
+    
+    # 7. EVALUATION PHASE
+    evaluation_results = {}
+    try:
+        if crawler and results:
+            evaluation_results = evaluation_metrics.evaluate(
+                original_prompt=original_prompt,
+                crawled_results=results,
+                llm_response=llm_response if llm_response else None,
+                harvest_ratio_metrics=crawler.harvest_ratio_metric.get_metrics()
+            )
+        else:
+            # Limited evaluation without full results
+            evaluation_results = _get_partial_metrics(evaluation_metrics)
+    except Exception as e:
+        logger.error(f"Evaluation error: {e}", exc_info=True)
+        error_messages.append(f"Evaluation error: {str(e)}")
+        evaluation_results = _get_partial_metrics(evaluation_metrics)
+        process_status = "partial_success"
+    
+    # 8. PREPARE FINAL RESPONSE
+    response = {
+        "status": process_status,
+        "prompt": original_prompt,
+        "results": results,
+        "metadata": metadata,
+        "llm_response": llm_response if llm_response else "N/A",
+        "evaluation_metrics": evaluation_results
+    }
+    
+    # Add errors if any occurred
+    if error_messages:
+        response["error"] = error_messages
+    
+    logger.info(f"Request completed with status '{process_status}'. Returning {len(results)} results.")
+    return response
+
+def _get_partial_metrics(evaluation_metrics):
+    """Helper function to get whatever metrics are available"""
+    metrics = {}
+    try:
+        if evaluation_metrics:
+            metrics["time_metrics"] = evaluation_metrics.time_metric.get_metrics()
+    except:
+        metrics["time_metrics"] = {"error": "Failed to retrieve time metrics"}
+    return metrics

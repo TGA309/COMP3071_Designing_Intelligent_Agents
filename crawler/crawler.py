@@ -121,9 +121,13 @@ class AdaptiveWebCrawler:
         if not filtered_seed_urls:
             self.logger.warning("No seed URLs passed URL keyword filtering. Stopping crawl.")
             return
+        
+        # Flag to track if any seed URLs were successfully crawled
+        any_seed_url_crawled = False
 
         # --- Crawling Loop ---
         current_depth = 0
+        
         # Start with the filtered seed URLs, excluding already visited ones
         urls_to_crawl_this_depth = [url for url in filtered_seed_urls if url not in self.visited_urls]
         all_discovered_urls = set(urls_to_crawl_this_depth) | self.visited_urls # Track all URLs encountered
@@ -236,6 +240,10 @@ class AdaptiveWebCrawler:
             # At the end of each depth, log the harvest ratio for this depth
             depth_hr = self.harvest_ratio_metric.get_depth_harvest_ratio(current_depth)
             self.logger.info(f"Harvest ratio at depth {current_depth}: {depth_hr:.4f}")
+            
+            # Check whether any seed url were crawled
+            if current_depth == 0 and processed_count_total_this_depth > 0:
+                any_seed_url_crawled = True
 
             current_depth += 1
 
@@ -251,7 +259,9 @@ class AdaptiveWebCrawler:
         self.logger.info(f"Cumulative harvest ratio: {cumulative_hr:.4f}")
 
         # Final save
-        self._save_crawler_state() 
+        self._save_crawler_state()
+
+        return any_seed_url_crawled
 
     def _process_single_url(self, url: str, prompt_keywords: List[str], current_depth: int, content_relevance_threshold: float, content_scorer: ContentHeuristics) -> Optional[List[str]]:
         """
