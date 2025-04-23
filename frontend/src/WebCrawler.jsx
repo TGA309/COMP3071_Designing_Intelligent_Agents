@@ -330,7 +330,39 @@ const WebCrawler = () => {
       setPrompt('');
     } catch (error) {
       console.error('Error fetching response:', error);
-      // You could also add error handling here to show an error message to the user
+      // Determine type of error
+      let errorMessage = "An unexpected error occurred";
+      
+      if (error.response) {
+        // The server responded with an error status code (4xx, 5xx)
+        errorMessage = `Server error: ${error.response.status} - ${error.response.statusText || 'Unknown error'}`;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage = "Network error: Unable to connect to server. This could be due to your internet connection or the server is currently unavailable. Please check your connection or try again later.";
+      } else {
+        // Something happened in setting up the request
+        errorMessage = `Request error: ${error.message}`;
+      }
+      
+      // Add error message to chat as a response
+      const errorResponse = {
+        id: Date.now().toString(),
+        text: errorMessage,
+        type: 'error',
+        isError: true
+      };
+      
+      const finalChats = [...chats];
+      const chatIndex = finalChats.findIndex(chat => chat.id === activeChat);
+      
+      if (chatIndex !== -1) {
+        // Replace loading message with error message
+        finalChats[chatIndex].messages = [
+          ...finalChats[chatIndex].messages.filter(msg => !msg.isLoading),
+          errorResponse
+        ];
+        setChats(finalChats);
+      }
     } finally {
       // Set loading state back to false after API call completes (success or error)
       setIsLoading(false);
