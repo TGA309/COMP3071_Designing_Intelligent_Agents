@@ -111,6 +111,14 @@ html, body, #root {
 .empty-chat-icon {
   font-size: 3rem;
   margin-bottom: 1rem;
+  display: flex; /* Added for better SVG alignment */
+  justify-content: center;
+}
+
+.empty-chat-icon svg,
+.empty-chat-icon img {
+  width: 4em;       
+  height: 4em;     
 }
 
 .empty-chat-area h3 {

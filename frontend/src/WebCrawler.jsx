@@ -4,6 +4,7 @@
  * A React application that allows users to search web content through an API.
  * Features include chat management, URL customization, and response viewing.
  */
+import ChatIconSvg from "./assets/DAWC.svg";
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './WebCrawler.css';
@@ -986,7 +987,9 @@ const WebCrawler = () => {
               ))
             ) : (
               <div className="empty-chat-area">
-                <div className="empty-chat-icon">🤖</div>
+              <div className="empty-chat-icon">
+                <img src={ChatIconSvg} size={24} alt="Chat Icon" />
+              </div>
                 <h3>Welcome to DAWC</h3>
                 <p>Send a message to start a new conversation</p>
               </div>
