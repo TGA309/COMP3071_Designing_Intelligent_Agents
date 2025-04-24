@@ -988,7 +988,7 @@ const WebCrawler = () => {
             ) : (
               <div className="empty-chat-area">
               <div className="empty-chat-icon">
-                <img src={ChatIconSvg} size={24} alt="Chat Icon" />
+                <img src={ChatIconSvg} alt="Chat Icon" />
               </div>
                 <h3>Welcome to DAWC</h3>
                 <p>Send a message to start a new conversation</p>
