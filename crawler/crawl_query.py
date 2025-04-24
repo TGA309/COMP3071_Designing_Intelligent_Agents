@@ -1,4 +1,3 @@
-# crawl_query.py (Updated with from_cache logic and store length)
 """
 API endpoint function to initiate a crawl and query operation.
 Uses the refactored AdaptiveWebCrawler and store modules.
@@ -38,7 +37,7 @@ def perform_crawl_and_query(
         max_depth (Optional[int]): Maximum crawl depth. Defaults to config.
         force_crawl (bool): If True, forces a crawl even if cached results are sufficient.
         relevance_threshold (Optional[float]): Base relevance threshold for crawl depth 0 and cache check. Defaults to config.
-        use_llm (bool): Whether to generate an LLM response (LLM logic remains commented).
+        use_llm_response (bool): Whether to generate an LLM response (LLM logic remains commented).
 
     Returns:
         Dict containing status, results, metadata, and optional LLM response.
@@ -142,7 +141,7 @@ def perform_crawl_and_query(
         logger.error(f"Cache check error: {e}", exc_info=True)
         error_messages.append(f"Cache check error: {str(e)}")
         cache_error = str(e)
-        process_status = "partial_success"  # Continue despite cache error
+        process_status = "partial_success"
     
     # 4. CRAWL PHASE (if not from cache)
     crawl_error = None

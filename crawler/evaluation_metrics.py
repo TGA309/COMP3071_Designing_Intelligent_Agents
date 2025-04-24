@@ -1,4 +1,3 @@
-# evaluation_metrics.py
 import time
 import datetime
 from typing import Dict, List, Any, Optional, Union
@@ -47,7 +46,7 @@ class HarvestRatio:
     """
     
     def __init__(self):
-        self.depth_metrics = {}  # Format: {depth: {"relevant": count, "total": count}}
+        self.depth_metrics = {}
         self.cache_metrics = {"relevant": 0, "total": 0}
         self.logger = setup_logger()
     
@@ -61,7 +60,7 @@ class HarvestRatio:
             depth_threshold: The relevance threshold for this depth
             is_processed: Whether the page was successfully processed
         """
-        # Initialize metrics for this depth if not exists
+        # Initialize metrics for this depth if it does not exist
         if depth not in self.depth_metrics:
             self.depth_metrics[depth] = {"relevant": 0, "total": 0}
         
@@ -69,7 +68,7 @@ class HarvestRatio:
         if is_processed:
             self.depth_metrics[depth]["total"] += 1
             
-            # Increment relevant counter if score meets threshold
+            # Increment relevance counter if score meets the threshold
             if page_score >= depth_threshold:
                 self.depth_metrics[depth]["relevant"] += 1
                 self.logger.debug(f"Relevant page found at depth {depth}: score={page_score:.3f}, threshold={depth_threshold:.3f}")
@@ -158,7 +157,7 @@ class HarvestRatio:
 
 
 class GenerativeAIScoring:
-    """Use the existing evaluate_responses function for generative AI scoring."""
+    """Use the existing evaluate_responses function from LLM processing pipeline for generative AI scoring."""
     
     def __init__(self):
         self.logger = setup_logger()

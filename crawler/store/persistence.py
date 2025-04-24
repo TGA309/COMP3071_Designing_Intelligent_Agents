@@ -1,4 +1,3 @@
-# store/persistence.py
 """
 Functions to save and load the crawler's state.
 This includes visited URLs, content hashes, and the content store itself.

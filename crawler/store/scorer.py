@@ -1,4 +1,3 @@
-# store/scorer.py
 """
 Functions to score content relevance based on TF-IDF and cosine similarity.
 """

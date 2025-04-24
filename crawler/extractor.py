@@ -1,4 +1,3 @@
-# extractor.py (Updated to use readability-lxml)
 """
 Handles fetching HTML content and extracting relevant text, code, and metadata from it.
 Uses readability-lxml for robust main content extraction.
@@ -87,27 +86,27 @@ def parse_and_extract(html_content: str, url: str) -> Optional[Dict[str, any]]:
         main_content_text = soup_main.get_text(separator='\n', strip=True)
         main_content_text_cleaned = clean_text(main_content_text) # Further clean (remove URLs etc.)
 
-        if not main_content_text_cleaned or len(main_content_text_cleaned.split()) < 30: # Lowered threshold slightly
+        if not main_content_text_cleaned or len(main_content_text_cleaned.split()) < 30:
              logger.info(f"Readability found no significant main content for {url}")
              return None
 
-        # --- Metadata Extraction (using original soup) ---
-        soup_orig = BeautifulSoup(html_content, 'html.parser')
-        publish_date = _extract_publish_date(soup_orig) # Extract date from original page
+        # --- Metadata Extraction ---
+        soup = BeautifulSoup(html_content, 'html.parser')
+        publish_date = _extract_publish_date(soup) # Extract date from original page
 
-        # --- Code Block Extraction (from original soup or main content soup) ---
+        # --- Code Block Extraction ---
         # Extracting from original might be better if readability removes code blocks
-        code_blocks = _extract_code_blocks(soup_orig)
+        code_blocks = _extract_code_blocks(soup)
 
-        # --- Link Extraction (from original soup) ---
-        links = _extract_links(soup_orig, url) # Extract links relative to the *original* URL
+        # --- Link Extraction ---
+        links = _extract_links(soup, url) # Extract links relative to the original URL
 
         # --- Assemble Result ---
         extracted_data = {
             'url': url,
             'domain': domain,
             'title': title,
-            'main_content': main_content_text_cleaned, # Use cleaned text
+            'main_content': main_content_text_cleaned,
             'code_blocks': code_blocks,
             'publish_date': publish_date,
             'links': links,
@@ -121,8 +120,7 @@ def parse_and_extract(html_content: str, url: str) -> Optional[Dict[str, any]]:
         return None
 
 
-# --- Helper Functions (kept for metadata, links, code) ---
-
+# --- Helper Functions ---
 def _extract_code_blocks(soup: BeautifulSoup) -> List[str]:
     """Extracts text content from code-related tags."""
     code_blocks = []
@@ -148,7 +146,7 @@ def _extract_code_blocks(soup: BeautifulSoup) -> List[str]:
         except Exception as e:
             logger.warning(f"Error extracting code with selector '{selector}': {e}")
 
-    # Simple deduplication
+    # Return deduplicated list
     return list(dict.fromkeys(code_blocks))
 
 

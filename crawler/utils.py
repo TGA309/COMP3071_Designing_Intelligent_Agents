@@ -1,8 +1,7 @@
-# utils.py
-
+# NLTK imports for NLP
 import nltk
 nltk.download('punkt') # For tokenization
-nltk.download('punkt_tab')
+nltk.download('punkt_tab') # For tokenization
 nltk.download('stopwords') # For stop word removal
 nltk.download('wordnet') # For lemmatization
 nltk.download('omw-1.4') # For wordnet multilingual data
@@ -11,7 +10,7 @@ import re
 from typing import List, Optional, Set
 from urllib.parse import urlparse
 from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer, PorterStemmer
+from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
 """
@@ -44,6 +43,7 @@ def is_valid_url(url: str) -> bool:
         return False
     
 def strip_and_join_with_spaces(keyword_list):
+    """Strips each content of the list and then joins them using whitespace to return a single string."""
     cleaned_keywords = [kw.strip() for kw in keyword_list if kw.strip()]
     keyword_query_string = ' '.join(cleaned_keywords)
     return keyword_query_string
@@ -54,7 +54,7 @@ def extract_keywords(
 ) -> List[str]:
     """
     Extracts unique keywords from a list of keyword phrases
-    using NLTK for processing.
+    using NLTK for NLP processing.
 
     Args:
         keyword_phrases: The list of keyword phrases (e.g., from Mistral AI).
@@ -106,7 +106,7 @@ def format_keywords_for_search(keyword_list):
 
     Returns:
     A single string formatted for search engines, with phrases quoted
-    and joined by " OR ", or an empty string if the input list is empty.
+    and joined by " + ", or an empty string if the input list is empty.
     """
     if not keyword_list:
         return ""

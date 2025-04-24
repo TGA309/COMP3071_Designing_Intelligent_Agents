@@ -1,4 +1,3 @@
-# crawler.py (Updated with URLHeuristics)
 """
 Core Adaptive Web Crawler implementation.
 Manages the crawling process, fetching, extraction, scoring, and interaction
@@ -22,16 +21,10 @@ class AdaptiveWebCrawler:
     def __init__(self):
         """Initializes the crawler."""
         self.logger = setup_logger()
-        # Keep ContentHeuristics for page content scoring
         self.content_heuristics = ContentHeuristics()
-        # Initialize harvest ratio metric
         self.harvest_ratio_metric = HarvestRatio()
 
-        # State managed externally, loaded/saved via persistence
         self.visited_urls: Set[str] = set()
-        # self.content_hashes are managed within content_heuristics instance
-
-        # Configuration shortcuts (used if not overridden by crawl method)
         self.default_max_depth = config.api.crawl.max_depth
         self.default_num_results = config.api.crawl.num_results
         self.default_num_seed_urls = config.api.crawl.num_seed_urls
@@ -49,8 +42,6 @@ class AdaptiveWebCrawler:
     def _load_crawler_state(self):
         """Loads visited URLs and content store from persistence."""
         self.logger.info("Attempting to load previous crawler state...")
-        # load_state now returns visited_urls, content_hashes
-        # It also calls builder.initialize_store internally
         loaded_visited, loaded_hashes = persistence.load_state()
         self.visited_urls = loaded_visited
         # Load hashes into the content_heuristics instance
@@ -83,6 +74,9 @@ class AdaptiveWebCrawler:
             num_seed_urls: Number of URLs to fetch from search if `urls` is not provided.
             max_depth: Maximum crawl depth.
             base_relevance_threshold: Starting content relevance threshold for depth 0.
+
+        Returns:
+            The flag to determine whether any seed URLs could be crawled.
         """
         # Use provided parameters or fall back to defaults stored in self
         current_num_seed_urls = num_seed_urls if num_seed_urls is not None else self.default_num_seed_urls
@@ -103,7 +97,7 @@ class AdaptiveWebCrawler:
             # Combine provided URLs with search results
             self.logger.info(f"Fetching {current_num_seed_urls} additional URLs from search...")
             search_results = perform_search(search_prompt, current_num_seed_urls)
-            raw_seed_urls = list(set(valid_provided_urls) | set(search_results)) # Use set union for unique URLs
+            raw_seed_urls = list(set(valid_provided_urls) | set(search_results))
             self.logger.info(f"Combined provided valid URLs with search results: {len(raw_seed_urls)}")
         else:
             self.logger.info(f"No URLs provided, performing search for {current_num_seed_urls} seed URLs...")
@@ -130,7 +124,7 @@ class AdaptiveWebCrawler:
         
         # Start with the filtered seed URLs, excluding already visited ones
         urls_to_crawl_this_depth = [url for url in filtered_seed_urls if url not in self.visited_urls]
-        all_discovered_urls = set(urls_to_crawl_this_depth) | self.visited_urls # Track all URLs encountered
+        all_discovered_urls = set(urls_to_crawl_this_depth) | self.visited_urls
 
         while current_depth <= current_max_depth and urls_to_crawl_this_depth:
             self.logger.info(f"\n--- Starting Crawl Depth {current_depth} ---")
@@ -143,11 +137,11 @@ class AdaptiveWebCrawler:
             )
             self.logger.info(f"Content Relevance threshold for depth {current_depth}: {current_depth_relevance_threshold:.2f}")
 
-            discovered_links_this_depth: Set[str] = set() # Collect all links found at this depth *before* filtering
+            discovered_links_this_depth: Set[str] = set() # Collect all links found at this depth before filtering
             processed_count_total_this_depth = 0
             stop_early = False # Flag to break outer loop if stopping early
 
-            # --- Process URLs in Strict Batches ---
+            # --- Process URLs in Batches ---
             for i in range(0, len(urls_to_crawl_this_depth), self.batch_size):
                 batch_urls = urls_to_crawl_this_depth[i : i + self.batch_size]
                 self.logger.info(f"--- Processing Batch {i // self.batch_size + 1} at Depth {current_depth} ({len(batch_urls)} URLs) ---")
@@ -156,33 +150,31 @@ class AdaptiveWebCrawler:
                 batch_futures = {}
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    # Submit only the URLs for the current batch
+                    # Submit the URLs for the current batch
                     for url in batch_urls:
-                        if url not in self.visited_urls: # Double check before submitting
-                            # Pass content_heuristics instance, not the class itself
+                        if url not in self.visited_urls:                            
                             future = executor.submit(self._process_single_url, url, prompt_keywords, current_depth, current_depth_relevance_threshold, self.content_heuristics)
                             batch_futures[future] = url
 
-                    # Process completed futures for THIS BATCH ONLY
+                    # Process completed futures
                     for future in concurrent.futures.as_completed(batch_futures):
                         url = batch_futures[future]
                         try:
                             result_links = future.result() # Returns list of discovered links or None
                             processed_count_this_batch += 1
                             processed_count_total_this_depth += 1
-                            self.visited_urls.add(url) # Mark as visited *after* successful processing
+                            self.visited_urls.add(url) # Mark as visited after successful processing
 
                             if result_links is not None:
                                 # Add newly discovered, valid links to the set for this depth
                                 new_raw_links_count = 0
                                 for link in result_links:
-                                     # Check validity only here, not visited or keyword status yet
+                                    # Check validity only here, not visited or keyword status yet
                                     if is_valid_url(link):
                                         discovered_links_this_depth.add(link)
                                         new_raw_links_count += 1
                                 if new_raw_links_count > 0:
                                     self.logger.debug(f"Discovered {new_raw_links_count} raw valid links from {url}")
-
 
                         except Exception as exc:
                             self.logger.error(f"URL {url} generated an exception during processing: {exc}", exc_info=False)
@@ -190,9 +182,10 @@ class AdaptiveWebCrawler:
 
                 self.logger.info(f"--- Batch {i // self.batch_size + 1} Complete (Processed {processed_count_this_batch} URLs) ---")
 
-                # --- Check for early stopping AFTER each batch is fully processed ---
+                # --- Check for early stopping after each batch is fully processed ---
                 self.logger.debug(f"Checking early stop condition after batch {i // self.batch_size + 1}.")
-                # Query needs the crawler instance's content store knowledge
+
+                # Query the content store for query results
                 query_results = self.query(query_prompt, n=self.default_num_results)
 
                 if query_results:
@@ -209,7 +202,7 @@ class AdaptiveWebCrawler:
             # --- End of Batch Loop ---
 
             if stop_early:
-                break # Exit the depth loop
+                break # Exit the depth loop if early stopping criteria met
 
             # --- Prepare for Next Depth ---
             self.logger.info(f"--- Depth {current_depth} Complete ---")
@@ -229,7 +222,7 @@ class AdaptiveWebCrawler:
                 # Update the set of all discovered URLs and prepare the list for the next loop iteration
                 urls_to_crawl_this_depth = []
                 for url in next_depth_urls_filtered:
-                    if url not in all_discovered_urls: # Final check
+                    if url not in all_discovered_urls:
                          urls_to_crawl_this_depth.append(url)
                          all_discovered_urls.add(url) # Add selected URLs to the global set
             else:
@@ -261,6 +254,7 @@ class AdaptiveWebCrawler:
         # Final save
         self._save_crawler_state()
 
+        # Return status if any seeds URLs were crawled
         return any_seed_url_crawled
 
     def _process_single_url(self, url: str, prompt_keywords: List[str], current_depth: int, content_relevance_threshold: float, content_scorer: ContentHeuristics) -> Optional[List[str]]:

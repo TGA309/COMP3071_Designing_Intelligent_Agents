@@ -1,4 +1,3 @@
-# store/builder.py
 """
 Functions to build and manage the in-memory content store during a crawl.
 """

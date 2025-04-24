@@ -1,15 +1,15 @@
-# crawler/logger.py
-
 import logging
 import datetime
 from config import config
 
 class SingletonLogger:
+    """Custom Singleton Logger Class."""
     _instance = None
     _initialized = False
 
     @classmethod
     def get_logger(cls):
+        """Method to get the singleton logger instance."""
         if cls._instance is None:
             cls._instance = cls._setup_logger()
         return cls._instance

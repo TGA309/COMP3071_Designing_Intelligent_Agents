@@ -26,7 +26,7 @@ def call_mistral_api(prompt: str):
     
     # Call the Mistral API
     response = client.chat.complete(
-        model="mistral-small-latest",  # Using a smaller model for efficiency
+        model="mistral-small-latest",
         messages=messages
     )
 
@@ -364,7 +364,6 @@ def evaluate_llm_response(user_prompt, raw_results, llm_response):
         if evaluation_json_str.endswith("```"):
             # Remove the closing code block marker
             evaluation_json_str = evaluation_json_str.rsplit("```", 1)[0].strip()
-
             
         evaluation_results = json.loads(evaluation_json_str.strip())
         return evaluation_results
