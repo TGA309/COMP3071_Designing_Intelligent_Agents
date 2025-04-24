@@ -13,16 +13,14 @@ from config import config
 
 logger = setup_logger()
 
-def calculate_score(query: str, k: int = 3, weight_heuristic: float = config.store.heuristic_score_weight, 
-                                  weight_cosine: float = config.store.cosine_similarity_score_weight) -> List[Dict[str, Any]]:
+def calculate_score(query: str, k: int = 3, alpha: float = config.store.heuristic_score_weight) -> List[Dict[str, Any]]:
     """
     Performs a similarity search using TF-IDF and cosine similarity with weighted scoring.
 
     Args:
         query: The search query string.
         k: The number of top results to return.
-        weight_heuristic: Weight for the heuristic score (default: 0.5).
-        weight_cosine: Weight for the cosine similarity score (default: 0.5).
+        alpha: Weight for the heuristic score.
 
     Returns:
         A list of the top k content items (dictionaries), sorted by weighted relevance score,
@@ -64,7 +62,7 @@ def calculate_score(query: str, k: int = 3, weight_heuristic: float = config.sto
         heuristic_scores = [item.get('heuristic_score', 0.0) for item in content_store]
         
         # Calculate weighted scores
-        weighted_scores = [weight_heuristic * h + weight_cosine * c 
+        weighted_scores = [alpha * h + (1 - alpha) * c 
                           for h, c in zip(heuristic_scores, cosine_similarities)]
 
         # Get indices of top k items by weighted score

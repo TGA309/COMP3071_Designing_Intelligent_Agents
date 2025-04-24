@@ -57,7 +57,6 @@ class AdaptiveWebCrawler:
         persistence.save_state(self.visited_urls, self.content_heuristics.content_hashes)
         self.logger.info("Crawler state saved.")
 
-    # Added parameters back to crawl method signature
     def crawl(self, original_prompt: str, search_prompt: str, query_prompt: str, prompt_keywords:List[str],
                urls: Optional[List[str]] = None, num_seed_urls: Optional[int] = None,
                max_depth: Optional[int] = None, base_relevance_threshold: Optional[float] = None):
@@ -320,10 +319,10 @@ class AdaptiveWebCrawler:
             return extracted_data.get('links', [])
         else:
             if page_score < content_relevance_threshold:
-                 self.logger.info(f"Skipping store for {url}: Content score {page_score:.3f} below threshold {content_relevance_threshold:.2f}")
+                self.logger.info(f"Skipping store for {url}: Content score {page_score:.3f} below threshold {content_relevance_threshold:.2f}")
             if not should_process:
-                 # Reason logged within should_process_content (duplicate or empty)
-                 pass
+                # Reason logged within should_process_content (duplicate or empty)
+                pass
             # Even if not stored, return links if the page was reachable (helps exploration)
             # Crucial: Return links even if content score is low, so URL heuristics can filter them later
             return extracted_data.get('links', [])
@@ -350,7 +349,7 @@ class AdaptiveWebCrawler:
             return []
 
         # Use the weighted scorer
-        results = scorer.calculate_score(query=prompt, k=num_results_to_get, weight_heuristic=config.store.heuristic_score_weight, weight_cosine=config.store.cosine_similarity_score_weight)
+        results = scorer.calculate_score(query=prompt, k=num_results_to_get, alpha=config.store.heuristic_score_weight)
 
         # Format results
         formatted_results = []

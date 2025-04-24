@@ -500,8 +500,6 @@ html, body, #root {
   transition: background-color 0.2s, color 0.2s;
   padding: 0; /* Remove any padding that might affect the shape */
   overflow: hidden; /* Ensure content doesn't overflow the circle */
-  box-sizing: border-box; /* Include padding and border in element's size */
-  flex-shrink: 0; /* Prevent flex shrinking which can distort the shape */
 }
 
 .popup-close-button:hover {
@@ -590,9 +588,12 @@ html, body, #root {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 50%; /* Circular button */
-  flex-shrink: 0;
+  min-width: 2rem; /* Ensures the width doesn't change */
+  min-height: 2rem; /* Ensures the height doesn't change */
+  border-radius: 50%;
   transition: background-color 0.2s, color 0.2s;
+  padding: 0; /* Remove any padding that might affect the shape */
+  overflow: hidden; /* Ensure content doesn't overflow the circle */
 }
 
 .remove-url-button:hover {

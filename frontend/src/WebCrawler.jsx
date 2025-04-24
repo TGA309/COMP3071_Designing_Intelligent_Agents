@@ -966,7 +966,7 @@ const WebCrawler = () => {
           ) : (
             <div className="empty-chat-list">
               <p>No chats yet</p>
-              <p className="empty-chat-hint">Start typing below to create a new chat</p>
+              <p className="empty-chat-hint">Start typing in a chatbox to create a new chat</p>
             </div>
           )}
         </div>

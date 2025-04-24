@@ -24,9 +24,6 @@ class StoreConfig:
     # Heuristic Score Weightage
     heuristic_score_weight = 0.6
 
-    # Cosine Similarity Score Weightage
-    cosine_similarity_score_weight = 0.4
-
 class CrawlerConfig:
     # How often (in terms of depth levels) to save crawler state
     save_frequency = 3 # Save more frequently perhaps
